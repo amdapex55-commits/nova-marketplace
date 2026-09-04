@@ -9,7 +9,7 @@
  * deliberately not "is a Supabase URL configured", because the seller workspace
  * needs the project long before the buyer app is ready for it.
  */
-import { store } from './store.js';
+import { store, isLiveId } from './store.js';
 
 const cfg = () => window.NOVAMKT;
 const live = () => cfg().BUYER_BACKEND === 'live' && !!cfg().SUPABASE_URL;
@@ -114,7 +114,10 @@ export const api = {
     if (live()) {
       const page = await rpc('deck', {
         p_interests: interests,
-        p_seen: seen.slice(-SEEN_TO_SEND),
+        // Belt and braces on top of the purge in store.js: one id of the wrong
+        // shape makes Postgres reject the whole call, and a deck that will not
+        // load is a far worse failure than a card shown twice.
+        p_seen: seen.filter(isLiveId).slice(-SEEN_TO_SEND),
         p_limit: limit,
         p_offset: offset
       });
@@ -174,7 +177,12 @@ export const api = {
   },
 
   async product(id) {
-    if (live()) return fromLive(await rpc('product_json', { p_id: id }));
+    if (live()) {
+      // A bookmarked fixture id, or a hand-typed URL. Answer "gone" rather than
+      // throwing a 400 the screen cannot do anything with.
+      if (!isLiveId(id)) return null;
+      return fromLive(await rpc('product_json', { p_id: id }));
+    }
     const c = await catalog();
     const p = c.byId.get(id);
     return p ? hydrate(c, p) : null;
@@ -182,7 +190,11 @@ export const api = {
 
   async products(ids) {
     if (!ids.length) return [];
-    if (live()) return (await rpc('products_by_id', { p_ids: ids })).map(fromLive);
+    if (live()) {
+      const usable = ids.filter(isLiveId);
+      if (!usable.length) return [];
+      return (await rpc('products_by_id', { p_ids: usable })).map(fromLive);
+    }
     const c = await catalog();
     return ids.map(id => c.byId.get(id)).filter(Boolean).map(p => hydrate(c, p));
   },

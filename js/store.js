@@ -27,7 +27,15 @@ const SEEN_CAP = 3000;
 const newDeviceId = () =>
   [...crypto.getRandomValues(new Uint8Array(9))].map(b => b.toString(16).padStart(2, '0')).join('');
 
+/* Product ids only mean anything to the backend that issued them. Fixture ids
+   look like `p0021`; live ones are uuids. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const backendNow = () => window.NOVAMKT?.BUYER_BACKEND || 'fixtures';
+
+export const isLiveId = id => UUID.test(String(id || ''));
+
 const blank = () => ({
+  backend: backendNow(),
   device_id: newDeviceId(),
   gender: null,          // 'women' | 'men' | 'everything' | null (skipped)
   interests: [],         // ids from catalog.interests
@@ -40,14 +48,38 @@ const blank = () => ({
 });
 
 function read() {
+  let saved, storedBackend;
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...blank(), ...JSON.parse(raw) } : blank();
+    const parsed = raw ? JSON.parse(raw) : null;
+    // Read the stored value BEFORE merging. blank() supplies a default for
+    // `backend`, so comparing the merged object always matched and the purge
+    // below never ran — state written before this field existed reads as
+    // undefined, which is exactly the case that needs cleaning.
+    storedBackend = parsed ? parsed.backend : backendNow();
+    saved = parsed ? { ...blank(), ...parsed } : blank();
   } catch {
     // Private mode, blocked site data, corrupt JSON — never let storage break
     // the app. A buyer with no history is a working buyer.
     return blank();
   }
+
+  /* The backend changed under this device.
+     Anyone who used the app while it read fixtures has `p0021`-shaped ids in
+     their seen-ledger, wishlist and bag. Sent to the live deck they are not
+     uuids, Postgres rejects the whole call, and the deck never loads — which is
+     exactly what happened on 4 Sep. Drop the ids that cannot belong to this
+     backend and keep everything that still means something: the device id, the
+     interests, the saved address, the order codes. */
+  if (storedBackend !== backendNow()) {
+    const keep = id => (backendNow() === 'live' ? UUID.test(id) : !UUID.test(id));
+    saved.seen = (saved.seen || []).filter(keep);
+    saved.wishlist = (saved.wishlist || []).filter(keep);
+    saved.bag = (saved.bag || []).filter(l => keep(l.id));
+    saved.backend = backendNow();
+    try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch { /* see above */ }
+  }
+  return saved;
 }
 
 let state = read();
