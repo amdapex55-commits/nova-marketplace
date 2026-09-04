@@ -1,0 +1,14 @@
+{
+  // Pinned to ./public on purpose. Wrangler's default assets directory is the
+  // REPO ROOT, which uploads .git in full — every object and the config — to a
+  // public URL. The deployable site lives in ./public and everything else is
+  // private by construction, not by an exclude list someone has to maintain.
+  "name": "nova-marketplace",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./public",
+    // No _redirects file: Cloudflare rejects a 200-rewrite to /index.html as an
+    // infinite loop. SPA fallback comes from here instead.
+    "not_found_handling": "single-page-application"
+  }
+}

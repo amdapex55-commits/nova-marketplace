@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nova — swipe the best of the internet</title>
+<meta name="description" content="A marketplace you swipe instead of scroll. Discover from independent Pakistani sellers, wishlist what you love, and check out with cash on delivery.">
+<meta name="theme-color" content="#14614a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/app.css">
+<script src="config.js"></script>
+</head>
+<body>
+
+<!-- The splash is in the HTML, not built by JavaScript, so it paints on the
+     first frame instead of after the module graph loads. The catalogue is
+     fetched underneath it; the 2-3 seconds are real work, not a delay. -->
+<div class="splash" id="splash" role="status" aria-live="polite">
+  <div class="splash-in">
+    <div class="mark">nova<em>.</em></div>
+    <p class="tag">Swipe the best of the internet</p>
+    <div class="bar"><i></i></div>
+  </div>
+</div>
+
+<div id="app" aria-busy="true"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,397 @@
+/* Nova Marketplace — buyer app.
+ *
+ * Deliberately a single light theme. The product is a swipe deck on a white
+ * card, and the whole read of it depends on that card being the brightest thing
+ * on the screen; a dark inversion changes what the product is. Every colour is
+ * painted explicitly so the page holds whatever ground the browser puts behind
+ * it. Revisit only if a real buyer asks.
+ *
+ * Palette: emerald and marigold — the accent pair the market itself already
+ * reads as local — on a warm paper ground.
+ */
+
+:root {
+  --paper:      #f3f2ee;
+  --card:       #ffffff;
+  --sunken:     #e9e8e3;
+  --ink:        #161a18;
+  --ink-soft:   #5b635e;
+  --ink-faint:  #8d958f;
+  --rule:       #dedcd6;
+  --rule-soft:  #ebe9e4;
+
+  --emerald:      #14614a;
+  --emerald-dark: #0e4636;
+  --emerald-soft: #dcece6;
+  --marigold:     #e0a010;
+  --marigold-soft:#fbeecc;
+  --dismiss:      #9a938a;
+  --danger:       #a8382a;
+  --danger-soft:  #f7e2de;
+
+  --shadow-card: 0 1px 2px rgba(22,26,24,.06), 0 18px 40px -18px rgba(22,26,24,.35);
+  --shadow-bar:  0 -1px 0 var(--rule), 0 -12px 28px -22px rgba(22,26,24,.5);
+  --r: 14px;
+
+  --tap: 46px;              /* nothing interactive is smaller than this */
+  --bar: 62px;              /* bottom tab bar */
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* A downward swipe on the deck must not become a pull-to-refresh. */
+  overscroll-behavior: none;
+}
+
+h1, h2, h3, .display {
+  font-family: "Familjen Grotesk", system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+img, svg { display: block; max-width: 100%; }
+input, select, textarea { font: inherit; color: inherit; }
+
+:focus-visible { outline: 2.5px solid var(--emerald); outline-offset: 2px; border-radius: 6px; }
+
+.num { font-variant-numeric: tabular-nums; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ---------------------------------------------------------------- app frame */
+/* Phone-first product. On a desktop it sits in a phone-width column rather than
+   stretching, because every layout decision below was made for a thumb. */
+#app {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  /* A fixed height, not a minimum: the tab bar and the checkout's Place-order
+     button must stay put while the content between them scrolls, which only
+     happens if the frame itself cannot grow. dvh, never vh — Safari's
+     disappearing toolbar makes 100vh taller than the visible page. */
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 0 1px var(--rule);
+}
+@media (min-width: 560px) { body { background: #dcdad4; } }
+
+.screen { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 18px; }
+
+/* ------------------------------------------------------------------- splash */
+.splash {
+  position: fixed; inset: 0; z-index: 90;
+  background: var(--emerald);
+  color: #fff;
+  display: grid; place-items: center;
+  text-align: center;
+  padding: 32px;
+}
+.splash-in { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.mark {
+  font-family: "Familjen Grotesk", system-ui, sans-serif;
+  font-weight: 700; font-size: 54px; letter-spacing: -.045em; line-height: 1;
+  opacity: 0; transform: translateY(14px);
+  animation: rise .62s cubic-bezier(.2,.7,.3,1) forwards;
+}
+.mark em { font-style: normal; color: var(--marigold); }
+.splash .tag {
+  font-size: 15px; letter-spacing: .01em; color: #cfe3db; max-width: 22ch;
+  opacity: 0; transform: translateY(10px);
+  animation: rise .6s cubic-bezier(.2,.7,.3,1) .22s forwards;
+}
+.splash .bar {
+  width: 132px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.22);
+  overflow: hidden; margin-top: 10px;
+}
+.splash .bar i { display: block; height: 100%; width: 40%; background: var(--marigold); animation: load 1.5s ease-in-out infinite; }
+@keyframes rise { to { opacity: 1; transform: none; } }
+@keyframes load { 0% { transform: translateX(-120%); } 100% { transform: translateX(340%); } }
+.splash.out { animation: fade .35s ease forwards; pointer-events: none; }
+@keyframes fade { to { opacity: 0; visibility: hidden; } }
+
+/* --------------------------------------------------------------- onboarding */
+.ob { padding: 30px 22px 24px; display: flex; flex-direction: column; gap: 8px; }
+.ob .step { font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+.ob h1 { font-size: 29px; line-height: 1.1; margin-top: 4px; }
+.ob p.sub { color: var(--ink-soft); margin: 4px 0 18px; font-size: 15px; }
+.choices { display: grid; gap: 10px; }
+.choices.two { grid-template-columns: 1fr 1fr; }
+.choice {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  text-align: left; padding: 15px 16px; min-height: var(--tap);
+  background: var(--card); border: 1.5px solid var(--rule); border-radius: var(--r);
+  transition: border-color .12s, background .12s;
+}
+.choice b { font-family: "Familjen Grotesk", system-ui, sans-serif; font-size: 16.5px; font-weight: 600; }
+.choice span { font-size: 13px; color: var(--ink-faint); }
+.choice[aria-pressed="true"] { border-color: var(--emerald); background: var(--emerald-soft); }
+.choice[aria-pressed="true"] span { color: var(--emerald-dark); }
+
+/* ---------------------------------------------------------------- deck */
+.deck-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0 14px 6px; }
+.deck-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 2px 10px; }
+.deck-head .display { font-size: 19px; }
+.deck-head .count { font-size: 12.5px; color: var(--ink-faint); font-weight: 600; }
+
+.deck {
+  position: relative; flex: 1; min-height: 0;
+  /* The card is dragged, so the browser must not claim the gesture for scroll. */
+  touch-action: none;
+  user-select: none; -webkit-user-select: none;
+}
+.swipe-card {
+  position: absolute; inset: 0;
+  background: var(--card);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  /* Only transform and opacity animate; nothing here triggers layout. */
+  will-change: transform;
+}
+.swipe-card.settling { transition: transform .28s cubic-bezier(.22,.8,.3,1), opacity .28s ease; }
+.swipe-card .photo { flex: 1; min-height: 0; background: var(--sunken); position: relative; }
+.swipe-card .photo img { width: 100%; height: 100%; object-fit: cover; }
+.swipe-card .meta { padding: 13px 16px 15px; display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--rule-soft); }
+.swipe-card .brand { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+.swipe-card h2 { font-size: 20px; line-height: 1.15; }
+.swipe-card .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 3px; }
+.swipe-card .price { font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 19px; }
+.swipe-card .where { font-size: 12.5px; color: var(--ink-faint); }
+
+/* Verdict stamps — they fade in with the drag, so the gesture explains itself
+   the first time without a tutorial overlay. */
+.stamp {
+  position: absolute; top: 20px; padding: 7px 13px; border-radius: 9px;
+  font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700;
+  font-size: 15px; letter-spacing: .04em; text-transform: uppercase;
+  opacity: 0; pointer-events: none; border: 2.5px solid;
+}
+.stamp.keep { left: 18px; color: var(--emerald); border-color: var(--emerald); background: rgba(255,255,255,.92); transform: rotate(-9deg); }
+.stamp.pass { right: 18px; color: var(--dismiss); border-color: var(--dismiss); background: rgba(255,255,255,.92); transform: rotate(9deg); }
+
+.deck-actions { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 14px 0 6px; }
+.round {
+  width: 56px; height: 56px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--card); border: 1.5px solid var(--rule);
+  box-shadow: 0 2px 10px -6px rgba(22,26,24,.5);
+  transition: transform .1s;
+}
+.round:active { transform: scale(.93); }
+.round.small { width: 44px; height: 44px; }
+.round.keep { border-color: var(--emerald); color: var(--emerald); }
+.round.pass { color: var(--dismiss); }
+.round[disabled] { opacity: .38; }
+.round svg { width: 24px; height: 24px; }
+
+.deck-empty { display: grid; place-items: center; height: 100%; text-align: center; padding: 30px; gap: 10px; }
+.deck-empty h2 { font-size: 22px; }
+.deck-empty p { color: var(--ink-soft); max-width: 30ch; margin: 0; }
+
+/* ------------------------------------------------------------------- grid */
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 14px; }
+.tile { background: var(--card); border-radius: var(--r); overflow: hidden; border: 1px solid var(--rule-soft); display: flex; flex-direction: column; }
+.tile .ph { aspect-ratio: 4 / 5; background: var(--sunken); position: relative; }
+.tile .ph img { width: 100%; height: 100%; object-fit: cover; }
+.tile .body { padding: 9px 10px 11px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.tile .brand { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+.tile h3 { font-size: 14px; line-height: 1.25; font-weight: 600; }
+.tile .price { font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 14.5px; margin-top: auto; padding-top: 5px; }
+.heart {
+  position: absolute; top: 7px; right: 7px; width: 34px; height: 34px; border-radius: 50%;
+  background: rgba(255,255,255,.94); display: grid; place-items: center; color: var(--ink-soft);
+  box-shadow: 0 1px 6px -2px rgba(22,26,24,.4);
+}
+.heart[aria-pressed="true"] { color: var(--danger); }
+.heart svg { width: 18px; height: 18px; }
+
+/* ------------------------------------------------------------------ header */
+.top { display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px; }
+.top h1 { font-size: 22px; flex: 1; }
+.back { width: 38px; height: 38px; margin-left: -6px; display: grid; place-items: center; border-radius: 10px; }
+.back svg { width: 20px; height: 20px; }
+
+.searchbar { padding: 6px 14px 12px; }
+.searchbar label { display: flex; align-items: center; gap: 9px; background: var(--card); border: 1.5px solid var(--rule); border-radius: 12px; padding: 0 13px; height: var(--tap); }
+.searchbar input { flex: 1; border: 0; background: none; outline: none; height: 100%; font-size: 16px; } /* 16px: anything smaller makes iOS zoom on focus */
+.searchbar svg { width: 18px; height: 18px; color: var(--ink-faint); flex: none; }
+
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 0 14px 12px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: none; padding: 8px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
+  background: var(--card); border: 1.5px solid var(--rule); color: var(--ink-soft); white-space: nowrap;
+}
+.chip[aria-pressed="true"] { background: var(--emerald); border-color: var(--emerald); color: #fff; }
+
+/* --------------------------------------------------------------- tab bar */
+.tabs {
+  position: sticky; bottom: 0; z-index: 20;
+  height: calc(var(--bar) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  background: var(--card); box-shadow: var(--shadow-bar);
+}
+.tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--ink-faint); font-size: 10.5px; font-weight: 600; position: relative; }
+.tab svg { width: 22px; height: 22px; }
+.tab[aria-current="page"] { color: var(--emerald); }
+.pip {
+  position: absolute; top: 8px; left: 50%; margin-left: 4px;
+  min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--danger); color: #fff; font-size: 10.5px; font-weight: 700;
+  display: grid; place-items: center;
+}
+
+/* ------------------------------------------------------------- product page */
+.gallery { position: relative; background: var(--sunken); }
+.gallery .frames { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.gallery .frames::-webkit-scrollbar { display: none; }
+.gallery .frames img { flex: none; width: 100%; aspect-ratio: 4/5; object-fit: cover; scroll-snap-align: center; }
+.dots { position: absolute; bottom: 10px; left: 0; right: 0; display: flex; justify-content: center; gap: 5px; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.55); }
+.dots i.on { background: #fff; }
+
+.pdp { padding: 16px 16px 20px; display: flex; flex-direction: column; gap: 5px; }
+.pdp .brand { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+.pdp h1 { font-size: 25px; line-height: 1.12; }
+.pdp .price { font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 26px; margin-top: 6px; }
+.pdp .desc { color: var(--ink-soft); margin: 12px 0 0; }
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rule-soft); border: 1px solid var(--rule-soft); border-radius: var(--r); overflow: hidden; margin-top: 18px; }
+.facts div { background: var(--card); padding: 11px 13px; }
+.facts dt { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; margin: 0 0 2px; }
+.facts dd { margin: 0; font-size: 14.5px; font-weight: 600; }
+
+.sticky-buy {
+  position: sticky; bottom: 0; display: flex; gap: 10px; padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  background: var(--card); box-shadow: var(--shadow-bar);
+}
+
+/* ------------------------------------------------------------------ buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: var(--tap); padding: 0 20px; border-radius: 12px;
+  font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 600; font-size: 16px;
+  background: var(--emerald); color: #fff; transition: transform .1s, background .12s;
+}
+.btn:active { transform: scale(.985); }
+.btn.block { width: 100%; }
+.btn.ghost { background: var(--card); color: var(--ink); border: 1.5px solid var(--rule); }
+.btn.quiet { background: var(--sunken); color: var(--ink); }
+.btn[disabled] { opacity: .5; pointer-events: none; }
+.btn svg { width: 19px; height: 19px; }
+
+/* --------------------------------------------------------------- bag & forms */
+.pad { padding: 0 14px; }
+.group { background: var(--card); border: 1px solid var(--rule-soft); border-radius: var(--r); margin: 0 14px 14px; overflow: hidden; }
+.group > header {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 13px 15px 11px; border-bottom: 1px solid var(--rule-soft); background: var(--card);
+}
+.group > header h2 { font-size: 16px; }
+.group > header .note { font-size: 12px; color: var(--ink-faint); font-weight: 600; }
+.group .inner { padding: 14px 15px; display: flex; flex-direction: column; gap: 13px; }
+
+.line { display: grid; grid-template-columns: 62px 1fr auto; gap: 12px; padding: 13px 15px; border-bottom: 1px solid var(--rule-soft); align-items: start; }
+.line:last-child { border-bottom: 0; }
+.line .ph { width: 62px; aspect-ratio: 4/5; border-radius: 8px; overflow: hidden; background: var(--sunken); }
+.line .ph img { width: 100%; height: 100%; object-fit: cover; }
+.line h3 { font-size: 14.5px; font-weight: 600; line-height: 1.25; }
+.line .sub { font-size: 12.5px; color: var(--ink-faint); margin-top: 2px; }
+.line .price { font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 15px; text-align: right; white-space: nowrap; }
+.line .rm { font-size: 12.5px; color: var(--ink-faint); text-decoration: underline; margin-top: 6px; }
+
+.stepper { display: inline-flex; align-items: center; border: 1.5px solid var(--rule); border-radius: 10px; overflow: hidden; margin-top: 8px; }
+.stepper button { width: 34px; height: 34px; display: grid; place-items: center; font-size: 18px; color: var(--ink-soft); }
+.stepper button[disabled] { opacity: .35; }
+.stepper span { min-width: 30px; text-align: center; font-weight: 700; font-size: 14.5px; }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font-size: 12.5px; font-weight: 600; letter-spacing: .02em; color: var(--ink-soft); }
+.field .hint { font-size: 12px; color: var(--ink-faint); font-weight: 400; }
+.field input, .field select, .field textarea {
+  width: 100%; min-height: var(--tap); padding: 11px 13px;
+  background: var(--paper); border: 1.5px solid var(--rule); border-radius: 11px;
+  font-size: 16px;                       /* iOS zooms in on anything smaller */
+  outline: none; transition: border-color .12s;
+}
+.field textarea { min-height: 76px; resize: vertical; line-height: 1.45; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--emerald); }
+.field.bad input, .field.bad select, .field.bad textarea { border-color: var(--danger); background: var(--danger-soft); }
+.field .err { font-size: 12.5px; color: var(--danger); font-weight: 600; }
+.two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+
+.opt { display: flex; gap: 12px; align-items: flex-start; padding: 13px 14px; border: 1.5px solid var(--rule); border-radius: 12px; background: var(--paper); text-align: left; width: 100%; }
+.opt .mark { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--rule); flex: none; margin-top: 2px; display: grid; place-items: center; }
+.opt .mark i { width: 10px; height: 10px; border-radius: 50%; background: var(--emerald); transform: scale(0); transition: transform .12s; }
+.opt[aria-checked="true"] { border-color: var(--emerald); background: var(--emerald-soft); }
+.opt[aria-checked="true"] .mark { border-color: var(--emerald); }
+.opt[aria-checked="true"] .mark i { transform: scale(1); }
+.opt b { display: block; font-family: "Familjen Grotesk", system-ui, sans-serif; font-size: 15.5px; font-weight: 600; }
+.opt span { display: block; font-size: 13px; color: var(--ink-soft); margin-top: 1px; }
+.opt .tail { margin-left: auto; font-weight: 700; font-size: 14.5px; white-space: nowrap; }
+.opt[disabled] { opacity: .5; }
+
+.totals { display: flex; flex-direction: column; gap: 9px; padding: 14px 15px; }
+.totals .r { display: flex; justify-content: space-between; gap: 12px; font-size: 14.5px; color: var(--ink-soft); }
+.totals .r b { color: var(--ink); font-weight: 600; }
+.totals .r.free b { color: var(--emerald); }
+.totals .grand { border-top: 1px solid var(--rule); padding-top: 11px; font-size: 17px; color: var(--ink); }
+.totals .grand b { font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 21px; }
+
+.notice { display: flex; gap: 10px; padding: 12px 14px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; margin: 0 14px 14px; }
+.notice.info { background: var(--emerald-soft); color: var(--emerald-dark); }
+.notice.warn { background: var(--marigold-soft); color: #6b4a02; }
+.notice.bad  { background: var(--danger-soft); color: var(--danger); }
+.notice b { font-weight: 700; }
+.notice svg { width: 22px; height: 22px; flex: none; margin-top: 1px; }
+
+.empty { display: grid; place-items: center; text-align: center; gap: 10px; padding: 60px 30px; }
+.empty h2 { font-size: 21px; }
+.empty p { color: var(--ink-soft); margin: 0; max-width: 30ch; }
+
+/* --------------------------------------------------------------- confirmation */
+.done { padding: 30px 18px 10px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.done .tick { width: 62px; height: 62px; border-radius: 50%; background: var(--emerald); color: #fff; display: grid; place-items: center; }
+.done .tick svg { width: 30px; height: 30px; }
+.done h1 { font-size: 26px; }
+.done .code { font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 27px; letter-spacing: .06em; padding: 9px 18px; background: var(--card); border: 1.5px dashed var(--rule); border-radius: 12px; margin-top: 6px; }
+.done p { color: var(--ink-soft); margin: 4px 0 0; max-width: 34ch; }
+
+.ship { padding: 13px 15px; border-bottom: 1px solid var(--rule-soft); }
+.ship:last-child { border-bottom: 0; }
+.ship .hd { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.ship .hd b { font-family: "Familjen Grotesk", system-ui, sans-serif; font-size: 15px; }
+.ship .hd span { font-size: 12.5px; color: var(--ink-faint); }
+.ship ul { margin: 7px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.ship li { font-size: 13.5px; color: var(--ink-soft); display: flex; justify-content: space-between; gap: 10px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(var(--bar) + 18px); transform: translateX(-50%) translateY(8px);
+  background: var(--ink); color: #fff; padding: 11px 17px; border-radius: 11px;
+  font-size: 14px; font-weight: 600; z-index: 80; opacity: 0; pointer-events: none;
+  transition: opacity .18s, transform .18s; max-width: 88vw; text-align: center;
+}
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
