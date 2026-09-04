@@ -15,29 +15,44 @@ import { adminSuite } from './admin.js';
 
 const app = document.getElementById('app');
 
-const sendToSignIn = message => {
+/* Two different situations, and telling someone to sign in when they already
+   are is how a dead end feels like a bug. */
+const refuse = (heading, detail, action) => {
   app.replaceChildren(el(`
     <div>
       <div class="bar"><span class="mark">nova<em>.</em></span></div>
       <div class="empty">
-        <h2>${message}</h2>
-        <p>Sign in first, then come back to this page.</p>
-        <a class="btn" href="seller.html">Go to sign in</a>
+        <h2>${heading}</h2>
+        <p>${detail}</p>
+        <a class="btn" href="${action.href}">${action.label}</a>
       </div>
     </div>`));
   app.setAttribute('aria-busy', 'false');
 };
 
 (async function boot() {
-  if (!auth.signedIn) return sendToSignIn('You are not signed in');
+  if (!auth.signedIn) {
+    return refuse('You are not signed in',
+      'Sign in first, then come back to this page.',
+      { href: 'seller.html', label: 'Go to sign in' });
+  }
   try {
-    if (!(await rpc('is_admin'))) return sendToSignIn('This page is not for this account');
+    if (!(await rpc('is_admin'))) {
+      return refuse('This page is not for this account',
+        'You are signed in, but this account does not have access here.',
+        { href: 'seller.html', label: 'Go to my shop' });
+    }
     await adminSuite({
       alsoASeller: !!(await rpc('me')),
       onSwitchToShop: () => { location.href = 'seller.html?shop=1'; }
     });
   } catch (err) {
-    if (err.status === 401 || err.status === 403) { await auth.signOut(); return sendToSignIn('Your session has expired'); }
+    if (err.status === 401 || err.status === 403) {
+      await auth.signOut();
+      return refuse('Your session has expired',
+        'Sign in again to carry on.',
+        { href: 'seller.html', label: 'Go to sign in' });
+    }
     console.error(err);
     app.replaceChildren(el('<div class="empty"><h2>Could not load</h2><p>Reload the page.</p></div>'));
     app.setAttribute('aria-busy', 'false');
