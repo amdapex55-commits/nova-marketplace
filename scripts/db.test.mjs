@@ -3,7 +3,7 @@
  *   npm run test:db
  *
  * supabase/local/bootstrap.sql runs FIRST and deliberately hands anon and
- * authenticated everything Supabase would, defaults included. If 0002_rls.sql
+ * authenticated everything Supabase would, defaults included. If 20260903230002_rls.sql
  * fails to take it back, these tests fail — which is the point. A local harness
  * that is stricter than production is how NovaCars shipped a grant that did
  * nothing and passed twelve assertions doing it.
@@ -40,8 +40,8 @@ const fails = async (text, opts) => {
 let sellerA, sellerB, userA, userB, prodA1, prodA2, prodB1, dear;
 
 before(async () => {
-  for (const f of ['supabase/local/bootstrap.sql', 'supabase/migrations/0001_init.sql',
-                   'supabase/migrations/0002_rls.sql', 'supabase/migrations/0003_place_order.sql']) {
+  for (const f of ['supabase/local/bootstrap.sql', 'supabase/migrations/20260903230001_init.sql',
+                   'supabase/migrations/20260903230002_rls.sql', 'supabase/migrations/20260903230003_place_order.sql']) {
     await run('psql', ['-q', '-v', 'ON_ERROR_STOP=1', '-f', path.join(ROOT, f), DB]);
   }
 

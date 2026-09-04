@@ -9,7 +9,7 @@
 --
 -- So this file deliberately hands anon and authenticated everything Supabase
 -- would, including the default privileges for tables created later. If
--- 0002_rls.sql fails to take it all away again, the tests must fail.
+-- 20260903230002_rls.sql fails to take it all away again, the tests must fail.
 
 drop schema if exists auth cascade;
 create schema auth;

@@ -68,12 +68,52 @@ dark inversion changes what the product is. Every colour is painted explicitly.
 **No framework.** A framework is 100–200 KB of JavaScript before a single
 product appears, and the whole promise is "smooth on phone Safari".
 
+## The Supabase project
+
+    org       NOVA MARKETPLACE
+    ref       fvmgouzjfikhmjfbgtgx
+    url       https://fvmgouzjfikhmjfbgtgx.supabase.co
+    region    ap-northeast-2 (Seoul)
+    key       sb_publishable_lZzUn1QDmCdId3HsiKP0yA_m9PJR7OR   (public by design)
+
+Linked, and all three migrations are applied (`supabase migration list` agrees).
+The schema is live; the tables are empty.
+
+**It is a different Supabase account from NovaX and NovaCars.** The
+`SUPABASE_ACCESS_TOKEN` in `~/.zshrc` now belongs to the NOVA MARKETPLACE
+account and reaches this project only — the CLI can no longer see the Nova Cars
+org. NovaCars needs no CLI, so this costs nothing, but it is worth knowing
+before wondering where the other projects went.
+
+**`db.fvmgouzjfikhmjfbgtgx.supabase.co` has no A record — IPv6 only — and this
+Mac has no IPv6 route.** The CLI works anyway because it goes through the
+session pooler (`aws-0-ap-northeast-2.pooler.supabase.com`) on its own. For
+psql, use the pooler string with the password in `~/.pgpass`. Do not spend time
+debugging the direct host.
+
+Verified against the deployed project, not just locally: `orders`,
+`seller_contacts`, `shipments` and `product_stats` all return **401** to the
+publishable key; `products` returns live rows only; `place_order` priced a
+two-seller basket from the database while ignoring a price the client tried to
+send; `get_order` returned `null` for the right code with the wrong phone.
+
 ## The data seam
 
-`config.js` has an empty `SUPABASE_URL`, so `api.js` runs off
-`public/data/catalog.json` — same client code, same render path, fixtures
-instead of Postgres. Filling in the URL and key is the only change needed to
-point the buyer app at a real database.
+`config.js` still has an empty `SUPABASE_URL`, so `api.js` runs off
+`public/data/catalog.json`. **Do not fill it in yet.** The write path is wired
+to the real project — `placeOrder`, `order` and `track` all branch on `live()` —
+but the READ path is not: `deck`, `browse`, `search`, `product`, `products` and
+`sellers` still read fixtures unconditionally. Switching the URL on today would
+hand fixture product ids to a real `place_order` and every order would fail.
+
+Two things have to happen first, in this order:
+
+1. **Wire the read path** in `api.js` to PostgREST — the deck query, the browse
+   list, `search` against the `search` tsvector plus `pg_trgm`, and the product
+   fetch with its photos.
+2. **Get real rows in.** The demo catalogue is placeholder artwork and should
+   never appear on a live storefront as if it were stock. Real products arrive
+   with the seller workspace (Phase 1) and the R2 upload pipeline.
 
 Both prerequisites are now written and tested in `supabase/`:
 
@@ -81,7 +121,7 @@ Both prerequisites are now written and tested in `supabase/`:
    and stock with the product rows locked, splits the bag into shipments, and
    decrements stock last. The browser sends ids and quantities only — a price
    that arrives from a browser is a price an attacker chose.
-2. **`0002_rls.sql` revokes before it grants.** Supabase pre-grants `anon` broad
+2. **`20260903230002_rls.sql` revokes before it grants.** Supabase pre-grants `anon` broad
    access to `public`, so a GRANT only ever adds to it.
    `supabase/local/bootstrap.sql` reproduces those permissive defaults *before*
    the migrations run, so the local suite fails if the revoke stops working.
