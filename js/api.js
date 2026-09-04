@@ -150,6 +150,7 @@ export const api = {
     if (live()) {
       const out = await rpc('browse', {
         p_interest: interest, p_limit: limit, p_offset: offset,
+        p_category: filters.category ?? null,
         p_min_price: filters.min ?? null, p_max_price: filters.max ?? null,
         p_city: filters.city ?? null, p_condition: filters.condition ?? null,
         p_size: filters.size ?? null, p_on_sale: !!filters.onSale,
@@ -230,6 +231,27 @@ export const api = {
   async myOrder(code) {
     if (!account.signedIn) return null;
     return rpc('my_order', { p_code: code });
+  },
+
+  async categories() {
+    if (!live()) return [];
+    return rpc('category_tree');
+  },
+  async banners() {
+    if (!live()) return [];
+    return rpc('banners_for', { p_where: 'browse' });
+  },
+  async suggestions(q = null) {
+    if (!live()) return { popular: [], trending: [], matches: [] };
+    return rpc('search_suggestions', { p_q: q });
+  },
+  recordSearch(q, found) {
+    if (!live()) return;
+    rpc('record_search', { p_q: q, p_found: found }).catch(() => {});
+  },
+  async related(productId) {
+    if (!live()) return [];
+    return (await rpc('related', { p_product: productId, p_limit: 6 })).map(fromLive);
   },
 
   async trending() {

@@ -8,7 +8,8 @@
 import { api } from './api.js';
 import { store } from './store.js';
 import { el, esc, ICON } from './ui.js';
-import { onboarding, browseScreen, searchScreen, wishlistScreen, productScreen, legalScreen } from './views.js';
+import { onboarding, wishlistScreen, productScreen, legalScreen } from './views.js';
+import { browseScreen, searchScreen } from './browse.js';
 import { shopScreen, offersScreen, inboxScreen, threadScreen, accountScreen } from './shop.js';
 import { account, wireGate } from './account.js';
 import { deckScreen } from './deck.js';
@@ -127,14 +128,19 @@ async function route() {
       });
     }
     case 'wishlist':
-      return paint(() => wishlistScreen({ onOpen: id => go(`#/p/${id}`) }), { tab: '#/wishlist' });
+      return paint(() => wishlistScreen({
+        onOpen: id => go(`#/p/${id}`),
+        onCheckout: () => go('#/bag')
+      }), { tab: '#/wishlist' });
     case 'p':
       return paint(() => productScreen({
         id: arg,
         onBack: () => history.back(),
         onBag: () => go('#/bag'),
         onShop: sellerId => go(`#/shop/${sellerId}`),
-        onMessage: (sellerId, productId) => go(`#/ask/${sellerId}/${productId}`)
+        onMessage: (sellerId, productId) => go(`#/ask/${sellerId}/${productId}`),
+        // The shop preview and the related row both open other listings.
+        onOpen: pid => go(`#/p/${pid}`)
       }));
     case 'bag':
       return paint(() => bagScreen({

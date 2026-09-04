@@ -498,3 +498,46 @@ export async function accountScreen({ onOrder, onSignedOut }) {
 
 const storage = key =>
   `${window.NOVAMKT.SUPABASE_URL}/storage/v1/object/public/product-photos/${key}-thumb.webp`;
+
+
+/* --------------------------------------------------------- shop preview --- */
+/* On a listing, below the description: who the shop is and three other things
+   they make. A preview, not the shop — enough to decide whether to go and look,
+   which is all it has to do. */
+export async function shopPreview(sellerId, exceptId, onShop, onOpen) {
+  const s = await api.shop(sellerId);
+  if (!s) return null;
+  const others = (s.products || []).filter(p => p.id !== exceptId).slice(0, 3);
+
+  const box = el(`
+    <div class="group shop-peek">
+      <header><h2>From this shop</h2><button class="note link" id="all">See all ${s.live} →</button></header>
+      <div class="peek-head">
+        <div class="peek-avatar">${esc(initials(s.brand_name))}</div>
+        <div>
+          <b>${esc(s.brand_name)}${s.founder ? '<span class="founder">Founder</span>' : ''}</b>
+          <span>${esc(s.city)} · ${s.delivered} delivered${
+            s.rating ? ` · ${Number(s.rating).toFixed(1)}★` : ''}</span>
+        </div>
+      </div>
+      ${s.story ? `<p class="peek-story">${esc(s.story.length > 160 ? s.story.slice(0, 158) + '…' : s.story)}</p>` : ''}
+      <div class="peek-row"></div>
+    </div>`);
+
+  box.querySelector('#all').addEventListener('click', () => onShop(sellerId));
+  const row = box.querySelector('.peek-row');
+  if (!others.length) {
+    row.remove();
+  } else {
+    for (const p of others) {
+      const c = el(`
+        <button class="peek-card">
+          <div class="ph"><img src="${esc(p.photos[0])}" alt="" loading="lazy"></div>
+          <b>${esc(p.title)}</b><span class="num">${money(p.price)}</span>
+        </button>`);
+      c.addEventListener('click', () => onOpen(p.id));
+      row.append(c);
+    }
+  }
+  return box;
+}

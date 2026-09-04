@@ -3,7 +3,7 @@ import { api } from './api.js';
 import { store } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
 import { burst, pop, magnetToBag } from './motion.js';
-import { priceHtml, variantPicker, stars, reviewList, policyStrip } from './shop.js';
+import { priceHtml, variantPicker, stars, reviewList, policyStrip, shopPreview } from './shop.js';
 
 /* --------------------------------------------------------------- onboarding */
 /* Both steps are skippable, and the question is "who are you shopping for",
@@ -97,185 +97,74 @@ export function tile(p, { onOpen }) {
   return node;
 }
 
-/* -------------------------------------------------------------------- browse */
-export async function browseScreen({ onOpen, onSearch }) {
-  const { interests } = await api.meta();
-  const root = el(`
-    <div class="screen">
-      <div class="top"><h1>Browse</h1></div>
-      <div class="searchbar">
-        <button style="display:flex;align-items:center;gap:9px;width:100%;background:var(--card);border:1.5px solid var(--rule);border-radius:12px;padding:0 13px;height:var(--tap);color:var(--ink-faint)">
-          ${ICON.search}<span style="font-size:15px">Search everything</span>
-        </button>
-      </div>
-      <div class="chips" role="group" aria-label="Categories"></div>
-      <div class="filter-bar" role="group" aria-label="Filters"></div>
-      <div class="result-count" id="count"></div>
-      <div class="scroll"><div class="grid"></div></div>
-    </div>`);
-  root.querySelector('.searchbar button').addEventListener('click', () => onSearch());
-  const chips = root.querySelector('.chips');
-  const grid = root.querySelector('.grid');
-  const bar = root.querySelector('.filter-bar');
-  const count = root.querySelector('#count');
-  let active = null;
-  let filters = { sort: 'new' };
-  let facets = { sizes: [], cities: [], max_price: 0 };
-
-  const activeCount = () =>
-    ['min', 'max', 'city', 'size', 'condition'].filter(k => filters[k]).length + (filters.onSale ? 1 : 0);
-
-  const drawFilters = () => {
-    bar.replaceChildren();
-    const pill = (label, on, fn) => {
-      const b = el(`<button class="filter-pill" data-on="${on}">${label}</button>`);
-      b.addEventListener('click', fn);
-      bar.append(b);
-      return b;
-    };
-
-    pill(`Filters${activeCount() ? `<span class="filter-count">${activeCount()}</span>` : ''}`,
-      activeCount() > 0, () => filterSheet());
-
-    pill('On sale', !!filters.onSale, () => { filters.onSale = !filters.onSale; load(); });
-    pill(filters.sort === 'cheap' ? 'Cheapest first' : filters.sort === 'dear' ? 'Dearest first' : 'Newest first',
-      filters.sort !== 'new', () => {
-        filters.sort = filters.sort === 'new' ? 'cheap' : filters.sort === 'cheap' ? 'dear' : 'new';
-        load();
-      });
-    for (const z of facets.sizes.slice(0, 6)) {
-      pill(z, filters.size === z, () => { filters.size = filters.size === z ? null : z; load(); });
-    }
-  };
-
-  /* The full filter sheet. The bar carries the two or three people actually
-     use; everything else lives behind one tap so the bar never becomes a wall. */
-  const filterSheet = () => {
-    const sheet = el(`
-      <div class="sheet" role="dialog" aria-modal="true" aria-label="Filters">
-        <div class="sheet-in">
-          <div class="sheet-bar"><h2>Filters</h2>
-            <button class="btn ghost" id="clear" style="min-height:34px;padding:0 12px;font-size:13px">Clear all</button>
-          </div>
-          <div class="group"><div class="inner">
-            <div class="two-up">
-              <div class="field"><label for="fmin">Least</label><input id="fmin" type="number" inputmode="numeric" placeholder="Rs 0" value="${filters.min ?? ''}"></div>
-              <div class="field"><label for="fmax">Most</label><input id="fmax" type="number" inputmode="numeric" placeholder="${facets.max_price ? 'Rs ' + facets.max_price : 'any'}" value="${filters.max ?? ''}"></div>
-            </div>
-            <div class="field"><label for="fcity">City</label><select id="fcity"><option value="">Anywhere</option>${
-              facets.cities.map(c => `<option${filters.city === c ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
-            <div class="field"><label for="fcond">Condition</label><select id="fcond"><option value="">Any</option>${
-              ['New', 'Like new', 'Gently used'].map(c => `<option${filters.condition === c ? ' selected' : ''}>${c}</option>`).join('')}</select></div>
-            <button class="btn block" id="apply">Show results</button>
-          </div></div>
-        </div>
-      </div>`);
-    const close = () => sheet.remove();
-    sheet.addEventListener('click', ev => { if (ev.target === sheet) close(); });
-    sheet.querySelector('#clear').addEventListener('click', () => {
-      filters = { sort: filters.sort }; close(); load();
-    });
-    sheet.querySelector('#apply').addEventListener('click', () => {
-      filters.min = Number(sheet.querySelector('#fmin').value) || null;
-      filters.max = Number(sheet.querySelector('#fmax').value) || null;
-      filters.city = sheet.querySelector('#fcity').value || null;
-      filters.condition = sheet.querySelector('#fcond').value || null;
-      close(); load();
-    });
-    document.body.append(sheet);
-  };
-
-  const load = async () => {
-    grid.replaceChildren();
-    count.textContent = 'Looking…';
-    const res = await api.browse({ interest: active, filters });
-    if (res.facets) facets = res.facets;
-    drawFilters();
-    count.textContent = res.total === undefined
-      ? '' : `${res.total} ${res.total === 1 ? 'listing' : 'listings'}`;
-    if (!res.items.length) {
-      grid.append(el(`
-        <div class="empty" style="grid-column:1/-1">
-          <h2>Nothing matches</h2>
-          <p>Try fewer filters — or clear them and see everything.</p>
-        </div>`));
-      return;
-    }
-    for (const p of res.items) grid.append(tile(p, { onOpen }));
-  };
-
-  const all = el('<button class="chip" aria-pressed="true">Everything</button>');
-  chips.append(all);
-  const buttons = [all];
-  for (const i of interests) {
-    const c = el(`<button class="chip" aria-pressed="false">${esc(i.label)}</button>`);
-    buttons.push(c);
-    chips.append(c);
-    c.addEventListener('click', () => { active = i.id; buttons.forEach(b => b.setAttribute('aria-pressed', String(b === c))); load(); });
-  }
-  all.addEventListener('click', () => { active = null; buttons.forEach(b => b.setAttribute('aria-pressed', String(b === all))); load(); });
-
-  load();
-  return root;
-}
-
-/* -------------------------------------------------------------------- search */
-export function searchScreen({ onOpen }) {
-  const root = el(`
-    <div class="screen">
-      <div class="top"><h1>Search</h1></div>
-      <div class="searchbar">
-        <label>
-          ${ICON.search}
-          <input type="search" placeholder="Kurta, chai, running, Lahore…" autocomplete="off" enterkeyhint="search" aria-label="Search products">
-        </label>
-      </div>
-      <div class="scroll"><div class="grid"></div></div>
-    </div>`);
-  const input = root.querySelector('input');
-  const grid = root.querySelector('.grid');
-
-  let t;
-  const run = async () => {
-    const q = input.value.trim();
-    grid.replaceChildren();
-    if (!q) return;
-    const { items } = await api.search(q);
-    if (!items.length) {
-      grid.append(el(`<p class="empty" style="grid-column:1/-1">No matches for “${esc(q)}”. Try a brand, a city, or a single word.</p>`));
-      return;
-    }
-    for (const p of items) grid.append(tile(p, { onOpen }));
-  };
-  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 160); });
-  setTimeout(() => input.focus({ preventScroll: true }), 60);
-  return root;
-}
+/* browse and search now live in browse.js — that screen grew banners, a
+   two-level category tree, filters and suggestions, and had outgrown this
+   file. tile() below is shared with it. */
 
 /* ------------------------------------------------------------------ wishlist */
-export async function wishlistScreen({ onOpen }) {
+export async function wishlistScreen({ onOpen, onCheckout }) {
   const ids = store.get().wishlist;
   const items = await api.products(ids);
   const root = el(`
     <div class="screen">
-      <div class="top"><h1>Wishlist</h1></div>
-      <div class="scroll"><div class="grid"></div></div>
+      <div class="top"><h1>Saved</h1></div>
+      <div class="scroll"><div id="rows"></div></div>
     </div>`);
-  const grid = root.querySelector('.grid');
+  const box = root.querySelector('#rows');
+
   if (!items.length) {
-    grid.replaceWith(el(`
+    box.append(el(`
       <div class="empty">
         <h2>Nothing saved yet</h2>
         <p>Swipe right on anything you like and it lands here. Nothing is bought until you check out.</p>
       </div>`));
     return root;
   }
-  for (const p of items) grid.append(tile(p, { onOpen }));
+
+  /* A row rather than a tile, because a saved item is one someone has already
+     decided they like — what they need now is a price and a way to buy it, not
+     another picture to admire. */
+  for (const p of items) {
+    const sized = (p.variants || []).length > 0;
+    const row = el(`
+      <div class="line saved-line">
+        <div class="ph"><img src="${esc(p.photos[0])}" alt="" loading="lazy"></div>
+        <div>
+          <div class="brand">${esc(p.seller.brand_name)}</div>
+          <h3>${esc(p.title)}</h3>
+          <div class="sub">${p.stock > 0 ? `${p.stock} left` : 'Sold out'}${sized ? ' · pick a size on the listing' : ''}</div>
+          <div class="saved-acts">
+            <button class="btn quiet" data-act="bag" ${p.stock ? '' : 'disabled'}>Add to bag</button>
+            <button class="btn" data-act="buy" ${p.stock ? '' : 'disabled'}>Buy it now</button>
+          </div>
+        </div>
+        <div class="price">${priceHtml(p)}</div>
+      </div>`);
+
+    row.querySelector('.ph').addEventListener('click', () => onOpen(p.id));
+    row.querySelector('h3').addEventListener('click', () => onOpen(p.id));
+
+    const put = () => {
+      // A listing with sizes cannot be bagged from here — the choice has to
+      // happen somewhere, and guessing it for them is how the wrong size ships.
+      if (sized) { onOpen(p.id); toast('Pick a size first'); return false; }
+      store.addToBag(p.id);
+      api.track('add_to_bag', p.id);
+      return true;
+    };
+    row.querySelector('[data-act=bag]').addEventListener('click', ev => {
+      if (put()) { pop(ev.currentTarget); toast('Added to your bag'); }
+    });
+    row.querySelector('[data-act=buy]').addEventListener('click', () => {
+      if (put()) onCheckout();
+    });
+    box.append(row);
+  }
   return root;
 }
 
 /* ------------------------------------------------------------------- product */
-export async function productScreen({ id, onBack, onBag, onShop, onMessage }) {
+export async function productScreen({ id, onBack, onBag, onShop, onMessage, onOpen }) {
   const p = await api.product(id);
   if (!p) return el('<div class="screen"><div class="empty"><h2>This listing has gone</h2><p>It may have sold or been taken down.</p></div></div>');
 
@@ -293,10 +182,15 @@ export async function productScreen({ id, onBack, onBag, onShop, onMessage }) {
           ${p.photos.length > 1 ? `<div class="dots">${p.photos.map((_, i) => `<i class="${i ? '' : 'on'}"></i>`).join('')}</div>` : ''}
         </div>
         <div class="pdp">
-          <button class="brand shoplink" id="shop">${esc(p.seller.brand_name)}
-            ${p.seller.rating ? `<span style="margin-left:6px">${stars(p.seller.rating, p.seller.reviews)}</span>` : ''}
-          </button>
-          <h1>${esc(p.title)}</h1>
+          <div class="pdp-top">
+            <div>
+              <button class="brand shoplink" id="shop">${esc(p.seller.brand_name)}
+                ${p.seller.rating ? `<span style="margin-left:6px">${stars(p.seller.rating, p.seller.reviews)}</span>` : ''}
+              </button>
+              <h1>${esc(p.title)}</h1>
+            </div>
+            <button class="icon-btn" id="share" aria-label="Share this listing">${ICON.share}</button>
+          </div>
           <div class="price">${priceHtml(p)}</div>
           ${p.was && p.sale_ends_at ? `<div class="sale-until">Sale ends ${new Date(p.sale_ends_at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short' })}</div>` : ''}
           <div id="picker" style="margin-top:18px"></div>
@@ -313,8 +207,10 @@ export async function productScreen({ id, onBack, onBag, onShop, onMessage }) {
           <div class="pad" style="padding:14px 0 0">
             <button class="btn ghost block" id="ask-shop">Ask ${esc(p.seller.brand_name)} a question</button>
           </div>
+          <div id="shoppreview"></div>
           <div id="policies"></div>
           <div id="reviews"></div>
+          <div id="related"></div>
           <div class="fineprint">
             <a href="#/legal">How buying on Nova works</a>
             <button id="report">Report this listing</button>
@@ -346,6 +242,43 @@ export async function productScreen({ id, onBack, onBag, onShop, onMessage }) {
   }
 
   root.querySelector('#policies').append(policyStrip());
+
+  /* Share. The Web Share sheet where there is one — which on a phone is the
+     WhatsApp forward this market actually runs on — and a copied link
+     everywhere else. */
+  root.querySelector('#share').addEventListener('click', async () => {
+    const url = `${location.origin}${location.pathname}#/p/${p.id}`;
+    const text = `${p.title} — ${money(p.price)} from ${p.seller.brand_name} on Nova`;
+    try {
+      if (navigator.share) { await navigator.share({ title: p.title, text, url }); return; }
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      toast('Link copied');
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast('Could not share that');
+    }
+  });
+
+  /* A preview of the shop, not the shop. Three of their other listings and the
+     one line that says who they are — enough to decide whether to go and look,
+     which is all this needs to do. */
+  shopPreview(p.seller.id, p.id, onShop, onOpen)
+    .then(node => { if (node) root.querySelector('#shoppreview').append(node); });
+
+  api.related(p.id).then(items => {
+    if (!items.length) return;
+    const box = el('<div class="group"><header><h2>You might also like</h2></header><div class="rel"></div></div>');
+    for (const r of items.slice(0, 6)) {
+      const c = el(`
+        <button class="rel-card">
+          <div class="ph"><img src="${esc(r.photos[0])}" alt="" loading="lazy"></div>
+          <b>${esc(r.title)}</b>
+          <span class="num">${money(r.price)}</span>
+        </button>`);
+      c.addEventListener('click', () => onOpen(r.id));
+      box.querySelector('.rel').append(c);
+    }
+    root.querySelector('#related').append(box);
+  });
 
   reviewList(p.id).then(node => { if (node) root.querySelector('#reviews').append(node); });
 
@@ -551,6 +484,43 @@ export function legalScreen({ onBack }) {
   }
 
   root.querySelector('#policies').append(policyStrip());
+
+  /* Share. The Web Share sheet where there is one — which on a phone is the
+     WhatsApp forward this market actually runs on — and a copied link
+     everywhere else. */
+  root.querySelector('#share').addEventListener('click', async () => {
+    const url = `${location.origin}${location.pathname}#/p/${p.id}`;
+    const text = `${p.title} — ${money(p.price)} from ${p.seller.brand_name} on Nova`;
+    try {
+      if (navigator.share) { await navigator.share({ title: p.title, text, url }); return; }
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      toast('Link copied');
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast('Could not share that');
+    }
+  });
+
+  /* A preview of the shop, not the shop. Three of their other listings and the
+     one line that says who they are — enough to decide whether to go and look,
+     which is all this needs to do. */
+  shopPreview(p.seller.id, p.id, onShop, onOpen)
+    .then(node => { if (node) root.querySelector('#shoppreview').append(node); });
+
+  api.related(p.id).then(items => {
+    if (!items.length) return;
+    const box = el('<div class="group"><header><h2>You might also like</h2></header><div class="rel"></div></div>');
+    for (const r of items.slice(0, 6)) {
+      const c = el(`
+        <button class="rel-card">
+          <div class="ph"><img src="${esc(r.photos[0])}" alt="" loading="lazy"></div>
+          <b>${esc(r.title)}</b>
+          <span class="num">${money(r.price)}</span>
+        </button>`);
+      c.addEventListener('click', () => onOpen(r.id));
+      box.querySelector('.rel').append(c);
+    }
+    root.querySelector('#related').append(box);
+  });
 
   reviewList(p.id).then(node => { if (node) root.querySelector('#reviews').append(node); });
   return root;

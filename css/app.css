@@ -493,7 +493,9 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .promise span { display: block; font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; line-height: 1.35; }
 .founder {
-  display: inline-block; margin-left: 9px; vertical-align: middle;
+  /* max-content, not just inline-block: inside a block-level <b> that wraps,
+     the badge was taking the whole line and reading as a banner. */
+  display: inline-block; width: max-content; margin-left: 9px; vertical-align: middle;
   font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
   background: var(--marigold); color: #3d2a02; padding: 3px 8px; border-radius: 999px;
 }
@@ -504,3 +506,110 @@ input, select, textarea { font: inherit; color: inherit; }
   background: rgba(255,255,255,.16); font-size: 12.5px; letter-spacing: .04em;
 }
 .ref-chip b { font-family: "Familjen Grotesk", system-ui, sans-serif; letter-spacing: .08em; }
+
+/* ---- banners ------------------------------------------------------------ */
+/* Horizontal, not stacked. A column of banners is a page nobody scrolls past. */
+.banners {
+  display: flex; gap: 10px; padding: 4px 14px 12px;
+  overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none;
+}
+.banners::-webkit-scrollbar { display: none; }
+.banner {
+  flex: none; scroll-snap-align: start; text-align: left;
+  min-width: 260px; max-width: 300px; padding: 16px 17px 14px;
+  border-radius: var(--r); color: #fff; position: relative; overflow: hidden;
+  display: flex; flex-direction: column; gap: 3px;
+  transition: transform .16s var(--ease-spring, cubic-bezier(.34,1.56,.64,1));
+}
+.banner:active { transform: scale(.98); }
+.banner::after {
+  content: ''; position: absolute; top: -60px; right: -40px;
+  width: 150px; height: 150px; border-radius: 50%; background: rgba(255,255,255,.1);
+}
+.banner > * { position: relative; z-index: 1; }
+.banner b { font-family: "Familjen Grotesk", system-ui, sans-serif; font-size: 18px; line-height: 1.2; }
+.banner span { font-size: 13.5px; opacity: .85; line-height: 1.45; }
+.banner i { font-style: normal; font-size: 12.5px; font-weight: 700; letter-spacing: .04em; margin-top: 6px; }
+.banner.tone-emerald  { background: var(--emerald); }
+.banner.tone-marigold { background: linear-gradient(135deg, #b9820c, var(--marigold)); color: #3d2a02; }
+.banner.tone-marigold::after { background: rgba(255,255,255,.22); }
+.banner.tone-ink      { background: var(--ink); }
+
+/* ---- categories --------------------------------------------------------- */
+.cats { display: flex; flex-direction: column; gap: 2px; }
+.subcats { padding-top: 2px; }
+.chip.small { padding: 6px 11px; font-size: 12.5px; }
+.cat-emoji { margin-right: 5px; }
+.cat-n {
+  margin-left: 6px; font-size: 10.5px; opacity: .7;
+  background: rgba(0,0,0,.08); padding: 1px 5px; border-radius: 7px;
+}
+.chip[aria-pressed="true"] .cat-n { background: rgba(255,255,255,.22); }
+
+/* ---- search ------------------------------------------------------------- */
+.fake-search {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  background: var(--card); border: 1.5px solid var(--rule); border-radius: 12px;
+  padding: 0 13px; height: var(--tap); color: var(--ink-faint); font-size: 15px;
+}
+.fake-search svg { width: 18px; height: 18px; flex: none; }
+.clear-q { width: 30px; height: 30px; display: grid; place-items: center; color: var(--ink-faint); }
+.clear-q svg { width: 15px; height: 15px; }
+.suggest-block { padding: 4px 0 10px; }
+.suggest-block h3 {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-faint); margin: 0 0 8px; padding: 0 16px;
+}
+.suggest-none { padding: 10px 16px; color: var(--ink-faint); font-size: 14px; }
+
+/* ---- product page ------------------------------------------------------- */
+.pdp-top { display: flex; align-items: flex-start; gap: 12px; }
+.pdp-top > div { flex: 1; min-width: 0; }
+.icon-btn {
+  flex: none; width: 40px; height: 40px; border-radius: 12px;
+  display: grid; place-items: center; background: var(--sunken); color: var(--ink-soft);
+  transition: background .16s, color .16s, transform .16s;
+}
+.icon-btn:hover { background: var(--emerald-soft); color: var(--emerald-dark); }
+.icon-btn:active { transform: scale(.92); }
+.icon-btn svg { width: 19px; height: 19px; }
+
+/* ---- shop preview on a listing ------------------------------------------ */
+.shop-peek .link { background: none; color: var(--emerald); font-weight: 600; }
+.peek-head { display: flex; gap: 12px; align-items: center; padding: 14px 15px 0; }
+.peek-avatar {
+  width: 44px; height: 44px; border-radius: 14px; flex: none;
+  display: grid; place-items: center; background: var(--emerald-soft); color: var(--emerald-dark);
+  font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 16px;
+}
+.peek-head b { display: block; font-size: 15.5px; font-weight: 600; }
+.peek-head span { display: block; font-size: 12.5px; color: var(--ink-faint); margin-top: 1px; }
+.peek-head .founder { margin-left: 7px; }
+.peek-story { margin: 10px 15px 0; font-size: 14px; line-height: 1.55; color: var(--ink-soft); }
+.peek-row, .rel {
+  display: flex; gap: 10px; padding: 13px 15px 15px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.peek-row::-webkit-scrollbar, .rel::-webkit-scrollbar { display: none; }
+.peek-card, .rel-card {
+  flex: none; width: 108px; text-align: left;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.peek-card .ph, .rel-card .ph {
+  width: 108px; aspect-ratio: 4/5; border-radius: 10px; overflow: hidden; background: var(--sunken);
+}
+.peek-card img, .rel-card img { width: 100%; height: 100%; object-fit: cover; }
+.peek-card b, .rel-card b {
+  font-size: 13px; font-weight: 600; line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.peek-card span, .rel-card span { font-size: 13px; font-weight: 700; }
+
+/* ---- saved ------------------------------------------------------------- */
+.saved-line .brand {
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 600;
+}
+.saved-line h3 { margin-top: 2px; cursor: pointer; }
+.saved-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.saved-acts .btn { min-height: 38px; padding: 0 14px; font-size: 14px; }
