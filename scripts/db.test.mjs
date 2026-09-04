@@ -748,7 +748,8 @@ test('a seller sees insights for their own listings only', async () => {
   const [[uid]] = await sql(`select user_id from seller_contacts where seller_id = '${sid}';`);
   const [[out]] = await sql(`select my_insights(30)::text;`, { role: 'authenticated', uid });
   const ins = JSON.parse(out);
-  assert.ok(ins.totals.impressions >= 40);
+  // `totals` became `funnel` when insights turned into a funnel with rates.
+  assert.ok(ins.funnel.seen >= 40);
   assert.ok(ins.products.length >= 4);
   assert.ok(ins.products.every(p => p.title), 'every row needs a name the seller recognises');
 
@@ -1074,4 +1075,91 @@ test('trending needs evidence, not just existence', async () => {
   const [[hot]] = await sql(`select trending(40)::text;`, { role: 'anon' });
   assert.ok(JSON.parse(hot).items.some(p => p.id === cold), 'activity should surface it');
   assert.ok(seen.size >= 0);
+});
+
+/* ------------------------------------------ shop story, founders, the funnel */
+
+test('founder numbers are claimed on approval, once, and run out', async () => {
+  const before = JSON.parse((await sql('select founder_spots()::text;', { role: 'anon' }))[0][0]);
+  assert.equal(before.total, 50);
+
+  const [[sid]] = await sql(
+    `insert into sellers (brand_name, city, status) values ('Founder Test','Lahore','pending') returning id;`);
+  const [[out]] = await sql(`select admin_set_seller_status('${sid}', 'active')::text;`,
+                            { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  const no = JSON.parse(out).founder_no;
+  assert.ok(no >= 1, 'approving should hand out a number');
+
+  const after = JSON.parse((await sql('select founder_spots()::text;', { role: 'anon' }))[0][0]);
+  assert.equal(after.taken, before.taken + 1);
+  assert.equal(after.left, before.left - 1);
+
+  // Suspending and re-approving must not consume a second spot.
+  await sql(`select admin_set_seller_status('${sid}', 'suspended');`, { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  await sql(`select admin_set_seller_status('${sid}', 'active');`, { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  const again = JSON.parse((await sql('select founder_spots()::text;', { role: 'anon' }))[0][0]);
+  assert.equal(again.taken, after.taken, 'a founder number is claimed once, not every approval');
+  assert.equal((await sql(`select founder_no from sellers where id = '${sid}';`))[0][0], String(no));
+});
+
+test('the spots really do run out rather than counting past the cap', async () => {
+  await sql(`update sellers set founder = true, founder_no = 1 where founder = false;`);
+  await sql(`insert into sellers (brand_name, city, status, founder, founder_no)
+             select 'Filler ' || g, 'Lahore', 'active', true, g from generate_series(1, 60) g
+             on conflict do nothing;`);
+  const spots = JSON.parse((await sql('select founder_spots()::text;', { role: 'anon' }))[0][0]);
+  assert.equal(spots.left, 0, 'never negative, never past the cap');
+
+  const [[sid]] = await sql(
+    `insert into sellers (brand_name, city, status) values ('Too Late','Lahore','pending') returning id;`);
+  const [[out]] = await sql(`select admin_set_seller_status('${sid}', 'active')::text;`,
+                            { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  assert.equal(JSON.parse(out).founder_no, null, 'no number once they are gone');
+  await sql(`delete from sellers where brand_name like 'Filler %' or brand_name in ('Too Late','Founder Test');`);
+});
+
+test('a shop tells its own story, and only its own', async () => {
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Deck Shop';`);
+  const [[uid]] = await sql(`select user_id from seller_contacts where seller_id = '${sid}';`);
+  await sql(`select update_story('We have block-printed in Karachi since 2019.', 'cover/abc');`,
+            { role: 'authenticated', uid });
+
+  const [[out]] = await sql(`select shop('${sid}', 50)::text;`, { role: 'anon' });
+  const s = JSON.parse(out);
+  assert.match(s.story, /block-printed in Karachi/);
+  assert.equal(s.cover_key, 'cover/abc');
+  assert.ok(Array.isArray(s.latest_reviews), 'the shop page carries its own reviews');
+
+  // A seller cannot write somebody else's story.
+  await sql(`select update_story('Hacked.', null);`, { role: 'authenticated', uid: userA });
+  const [[still]] = await sql(`select shop('${sid}', 50)::text;`, { role: 'anon' });
+  assert.match(JSON.parse(still).story, /block-printed/);
+});
+
+test('the delivery promise is withheld until it has been kept a few times', async () => {
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Deck Shop';`);
+  const [[out]] = await sql(`select shop('${sid}', 50)::text;`, { role: 'anon' });
+  const onTime = JSON.parse(out).on_time;
+  // Fewer than three delivered parcels means no claim at all — "usually ships
+  // in 2 days" from a shop that has never shipped is a claim, not a promise.
+  const [[delivered]] = await sql(
+    `select count(*) from shipments where seller_id = '${sid}' and status = 'delivered';`);
+  if (Number(delivered) < 3) assert.equal(onTime, null, 'no evidence, no promise');
+  else assert.ok(onTime >= 0 && onTime <= 100);
+});
+
+test('insights are a funnel a seller can act on', async () => {
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Deck Shop';`);
+  const [[uid]] = await sql(`select user_id from seller_contacts where seller_id = '${sid}';`);
+  const [[out]] = await sql(`select my_insights(30)::text;`, { role: 'authenticated', uid });
+  const f = JSON.parse(out).funnel;
+  for (const k of ['seen', 'saved', 'opened', 'bagged', 'ordered', 'earned', 'pending']) {
+    assert.ok(k in f, `the funnel is missing ${k}`);
+    assert.ok(Number(f[k]) >= 0);
+  }
+  // Earned is only what has actually been delivered — money in hand, not money
+  // hoped for. Pending is the rest.
+  const [[earned]] = await sql(
+    `select coalesce(sum(items_total),0) from shipments where seller_id = '${sid}' and status = 'delivered';`);
+  assert.equal(Number(f.earned), Number(earned));
 });

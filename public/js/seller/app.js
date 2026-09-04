@@ -33,18 +33,97 @@ function fail(err) {
 
 /* ------------------------------------------------------------------- signed out */
 
+/* The pitch.
+ *
+ * Every claim here is one the software actually keeps, and each is written as
+ * the thing it replaces rather than as a feature. "0% commission" means nothing
+ * on its own; "Daraz takes a cut of every sale, we take none" is the same fact
+ * with the comparison a seller is already making in their head.
+ *
+ * The founder count is read from the database, not typed in. A scarcity claim
+ * that is not enforced is a lie with a countdown on it.
+ */
+function pitch(spots) {
+  const left = spots?.left ?? null;
+  return el(`
+    <div class="pitch">
+      <div class="pitch-hero">
+        <span class="mark">nova<em>.</em></span>
+        ${left ? `<span class="spots">${left} founder spot${left === 1 ? '' : 's'} left</span>` : ''}
+        <h1>Sell where people are actually looking.</h1>
+        <p>Buyers swipe through Nova one product at a time. No search box to be
+          buried in, no page two. Your listing gets the whole screen.</p>
+      </div>
+
+      <div class="pitch-grid">
+        <div class="claim">
+          <b>0%</b>
+          <h3>commission, for launch sellers</h3>
+          <p>Everyone else takes a cut of every sale. We take none — not at
+            launch, and never on the money itself. You keep the whole price.</p>
+        </div>
+        <div class="claim">
+          <b>10 min</b>
+          <h3>to your first listing</h3>
+          <p>Photos straight off your phone. We resize them, you never touch a
+            file. Sizes, colours and stock in the same form.</p>
+        </div>
+        <div class="claim">
+          <b>Cash</b>
+          <h3>stays in your hand</h3>
+          <p>Your rider, your parcel, your cash on delivery. Nova never holds a
+            rupee of it, so there is nothing to wait for and nobody to chase.</p>
+        </div>
+        <div class="claim">
+          <b>Free</b>
+          <h3>for your first month</h3>
+          <p>Then a flat monthly fee — the same whether you sell five things or
+            five hundred. No percentage, ever.</p>
+        </div>
+      </div>
+
+      <div class="pitch-how">
+        <h2>What it actually takes</h2>
+        <ol>
+          <li><b>Make an account.</b> Email and a password.</li>
+          <li><b>Tell us about your shop.</b> Name, city, the address we would collect from.</li>
+          <li><b>Add a listing.</b> Photos, price, sizes. Save it as a draft if you are not ready.</li>
+          <li><b>We check the shop by hand</b> — usually the same day. Then everything you queued goes live at once.</li>
+        </ol>
+      </div>
+
+      <div class="pitch-truth">
+        <h2>Things we would rather you heard from us</h2>
+        <ul>
+          <li><b>We are new.</b> If you want a marketplace with a million buyers today, that is Daraz. What we have is every buyer seeing one product at a time instead of a grid of forty.</li>
+          <li><b>You handle delivery.</b> You book your own courier and you collect your own cash. We show the buyer where the parcel is; we do not move it.</li>
+          <li><b>Cash on delivery gets refused sometimes.</b> That cost lands on you, as it does everywhere. Buyers can cancel free for 24 hours, which is there to stop the parcel before you post it.</li>
+        </ul>
+      </div>
+    </div>`);
+}
+
 function signedOut() {
-  let mode = 'in';
+  // A first-time visitor lands on the pitch, not on a password box for an
+  // account they do not have. Anyone who has signed in here before gets the
+  // sign-in form straight away.
+  let mode = localStorage.getItem('nova.seller.returning') ? 'in' : 'up';
+  let spots = null;
   const root = el('<div><div class="bar"><span class="mark">nova<em>.</em></span><span class="who"><b>For sellers</b></span></div><div id="pane"></div></div>');
   const pane = root.querySelector('#pane');
 
+  // Read the real number. If it cannot be read, the claim is simply not made.
+  rpc('founder_spots').then(s => { spots = s; render(); }).catch(() => {});
+
   const render = () => {
-    pane.replaceChildren(el(`
-      <div class="ob" style="padding:28px 18px">
-        <h1>${mode === 'in' ? 'Sign in to your shop' : 'Open a shop on Nova'}</h1>
+    pane.replaceChildren();
+    if (mode === 'up') pane.append(pitch(spots));
+    pane.append(el(`
+      <div class="ob" style="padding:28px 18px 10px">
+        <h1>${mode === 'in' ? 'Sign in to your shop' : 'Start selling'}</h1>
         <p class="sub">${mode === 'in'
           ? 'Your listings, your orders, your money — you collect it yourself on delivery.'
-          : 'Free for your first month. You keep every rupee: buyers pay you directly, cash on delivery.'}</p>
+          : 'Two fields now. The shop details come next.'}</p>
       </div>`));
 
     const form = el(`
@@ -84,6 +163,7 @@ function signedOut() {
       try {
         if (mode === 'in') await auth.signIn(email, password);
         else await auth.signUp(email, password);
+        try { localStorage.setItem('nova.seller.returning', '1'); } catch { /* private mode */ }
         await boot();
       } catch (e) {
         show(e.message || 'That did not work.');
@@ -717,22 +797,70 @@ function sellerThread(id, refresh) {
 async function insights() {
   const data = await rpc('my_insights', { p_days: 30 });
   const wrap = el('<div></div>');
-  const t = data.totals;
+  const f = data.funnel;
+  const n = v => Number(v || 0);
+  const pct = (a, b) => (n(b) ? Math.round((n(a) / n(b)) * 1000) / 10 : null);
+
+  /* The funnel, with the rates worked out.
+     "412 views" tells a seller nothing they can act on. "412 seen → 38 saved
+     (9%) → 4 ordered (1%)" tells them exactly which step is leaking, which is
+     the only reason to put numbers on a screen. */
+  /* Sequential steps only. Saving is NOT one: a buyer can open a listing
+     without saving it, so putting Saved between Seen and Opened produced
+     "Opened — 300%", which is nonsense dressed as insight. Saving is a signal
+     about the card, so it sits with the other headline numbers instead. */
+  const STEPS = [
+    ['Seen', n(f.seen), 'a card appeared in someone\'s deck'],
+    ['Opened', n(f.opened), 'tapped through to the listing'],
+    ['Bagged', n(f.bagged), 'added to a bag'],
+    ['Ordered', n(f.ordered), 'actually bought']
+  ];
 
   wrap.append(el(`
     <dl class="stats four">
-      <div><dt>Seen</dt><dd class="num">${t.impressions.toLocaleString('en-PK')}</dd></div>
-      <div><dt>Saved</dt><dd class="num">${t.keeps.toLocaleString('en-PK')}</dd></div>
-      <div><dt>Opened</dt><dd class="num">${t.detail_views.toLocaleString('en-PK')}</dd></div>
-      <div><dt>Sold</dt><dd class="num">${money(t.sold)}</dd></div>
+      <div><dt>Earned</dt><dd class="num">${money(f.earned)}</dd></div>
+      <div><dt>On its way</dt><dd class="num">${money(f.pending)}</dd></div>
+      <div><dt>Saved</dt><dd class="num">${n(f.saved)}${
+        pct(f.saved, f.seen) === null ? '' : ` <small>${pct(f.saved, f.seen)}%</small>`}</dd></div>
+      <div><dt>Seen → bought</dt><dd class="num">${
+        pct(f.ordered, f.seen) === null ? '—' : pct(f.ordered, f.seen) + '%'}</dd></div>
     </dl>`));
 
-  if (!t.impressions) {
+  const funnel = el(`
+    <div class="group">
+      <header><h2>Last 30 days</h2><span class="note">where people drop off</span></header>
+      <div class="funnel"></div>
+    </div>`);
+  const top = Math.max(1, n(f.seen));
+  STEPS.forEach(([label, value, what], i) => {
+    const prev = i ? STEPS[i - 1][1] : null;
+    const rate = i ? pct(value, prev) : null;
+    funnel.querySelector('.funnel').append(el(`
+      <div class="step">
+        <div class="step-head">
+          <b>${label}</b>
+          <span class="num">${value.toLocaleString('en-PK')}</span>
+          ${rate === null ? '' : `<i class="${rate < 5 && i > 0 ? 'weak' : ''}">${rate}%</i>`}
+        </div>
+        <div class="step-bar"><b style="width:${Math.max(1.5, (value / top) * 100)}%"></b></div>
+        <span class="step-what">${what}</span>
+      </div>`));
+  });
+  wrap.append(funnel);
+
+  if (!n(f.seen)) {
     wrap.append(el(`
       <div class="notice info">
         <div>Nothing to show yet — these fill up once your listings are live and
         buyers start swiping. <b>Seen</b> is how many times a card appeared,
         <b>saved</b> is a swipe right.</div>
+      </div>`));
+  } else if (pct(f.saved, f.seen) !== null && pct(f.saved, f.seen) < 5) {
+    // One sentence of advice beats a dashboard nobody reads.
+    wrap.append(el(`
+      <div class="notice warn">
+        <div><b>Plenty of people are seeing your listings and few are saving them.</b>
+        That is almost always the first photograph or the price — not the reach.</div>
       </div>`));
   }
 
@@ -787,7 +915,25 @@ function shop() {
         </div>
       </div>
       <div class="group">
-        <header><h2>Your plan</h2></header>
+        <header><h2>Your story</h2><span class="note">buyers read this on your shop page</span></header>
+        <div class="inner">
+          <div class="field">
+            <label for="s-story">What should people know about you?</label>
+            <textarea id="s-story" maxlength="900" rows="5" placeholder="Who makes it, where, and what makes yours different. Two or three sentences beats a paragraph.">${esc(me.story || '')}</textarea>
+            <div class="hint" id="s-count"></div>
+          </div>
+          <div class="field">
+            <label>Cover photo <span class="hint">sits behind your shop name</span></label>
+            <div class="thumbs" id="s-cover"></div>
+            <input type="file" id="s-coverfile" accept="image/*" hidden>
+          </div>
+          <button class="btn block" id="s-story-save">Save my story</button>
+          <div class="err" id="s-story-err" role="alert" hidden></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <header><h2>Your plan</h2>${me.founder ? `<span class="state active">Founder #${me.founder_no}</span>` : ''}</header>
         <div class="inner" style="gap:6px">
           <div style="font-size:15px">Free until <b>${fmtDate(me.trial_ends_at)}</b>.</div>
           <div style="font-size:14px;color:var(--ink-soft)">After that it is a flat monthly fee. We never take a cut of your sales — buyers pay you directly and you keep all of it.</div>
@@ -820,6 +966,68 @@ function shop() {
       ev.currentTarget.disabled = false;
     }
   });
+  /* The story, and a cover photograph put through the same resize as a listing
+     photo — a 4 MB banner would cost more to load than the whole shop page. */
+  const count = wrap.querySelector('#s-count');
+  const storyBox = wrap.querySelector('#s-story');
+  const tellCount = () => { count.textContent = `${storyBox.value.length} / 900`; };
+  storyBox.addEventListener('input', tellCount);
+  tellCount();
+
+  let coverKey = me.cover_key || null;
+  let coverPrepared = null;
+  const coverBox = wrap.querySelector('#s-cover');
+  const coverFile = wrap.querySelector('#s-coverfile');
+
+  const drawCover = () => {
+    coverBox.replaceChildren();
+    const src = coverPrepared?.preview || (coverKey ? photoUrl(coverKey, 'card') : null);
+    if (src) {
+      const t = el(`<div class="thumb" style="width:150px;aspect-ratio:16/9"><img src="${esc(src)}" alt=""><button aria-label="Remove cover">&times;</button></div>`);
+      t.querySelector('button').addEventListener('click', () => { coverKey = null; coverPrepared = null; drawCover(); });
+      coverBox.append(t);
+    }
+    const add = el(`<button class="picker" type="button" style="width:150px;aspect-ratio:16/9"><span>+</span><span>${src ? 'Replace' : 'Add a cover'}</span></button>`);
+    add.addEventListener('click', () => coverFile.click());
+    coverBox.append(add);
+  };
+  drawCover();
+
+  coverFile.addEventListener('change', async () => {
+    const f = coverFile.files[0];
+    coverFile.value = '';
+    if (!f) return;
+    try { coverPrepared = await prepare(f); drawCover(); } catch (e) { fail(e); }
+  });
+
+  const storyErr = wrap.querySelector('#s-story-err');
+  wrap.querySelector('#s-story-save').addEventListener('click', async ev => {
+    storyErr.hidden = true;
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      if (coverPrepared) {
+        const key = baseKey(me.id, 'shop', coverPrepared.id);
+        for (const [variant, out] of Object.entries(coverPrepared.variants)) {
+          await storage.upload(objectName(key, variant), out.blob);
+        }
+        // Storage has no cascade, so the one it replaces goes now.
+        if (coverKey && coverKey !== key) await storage.remove(objectNames(coverKey));
+        coverKey = key;
+        coverPrepared = null;
+      }
+      me = await rpc('update_story', { p_story: storyBox.value.trim(), p_cover: coverKey });
+      toast('Saved');
+      render();
+    } catch (e) {
+      storyErr.hidden = false;
+      storyErr.textContent = e.message;
+      btn.disabled = false;
+      btn.textContent = 'Save my story';
+    }
+  });
+
   wrap.querySelector('#s-out').addEventListener('click', async () => { await auth.signOut(); me = null; boot(); });
   return wrap;
 }

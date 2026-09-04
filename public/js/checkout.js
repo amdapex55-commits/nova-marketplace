@@ -16,7 +16,7 @@ import { store, bagKey } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
 import { priceOrder, normalisePhone, prettyPhone, orderCode, RULES } from './money.mjs';
 import { statusRail } from './motion.js';
-import { reviewSheet } from './shop.js';
+import { reviewSheet, policyStrip } from './shop.js';
 import { account, signUpGate } from './account.js';
 
 const lineFrom = p => ({ id: p.id, seller_id: p.seller_id, title: p.title, price: p.price, photo: p.photos[0], city: p.city, brand: p.seller.brand_name });
@@ -123,6 +123,8 @@ export async function bagScreen({ onOpen, onCheckout }) {
       </div>
     </div>`);
   body.append(total);
+
+  body.append(policyStrip({ compact: true }));
 
   const go = el('<div class="pad" style="padding-bottom:20px"><button class="btn block">Checkout</button></div>');
   go.querySelector('button').addEventListener('click', () => onCheckout.go());
@@ -303,6 +305,9 @@ export async function checkoutScreen({ onBack, onPlaced }) {
 
     body.append(el(`
       <div class="notice info"><div>Nova never holds your money. You pay each seller directly, and each parcel is dispatched by the seller who made it.</div></div>`));
+    // The three promises, one tap before they commit — this is the moment they
+    // are being asked to trust a stranger with their address.
+    body.append(policyStrip());
 
     /* --- footer --- */
     foot.replaceChildren();
