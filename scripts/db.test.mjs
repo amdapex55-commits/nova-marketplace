@@ -583,3 +583,172 @@ test('a seller cannot publish by writing status directly, bypassing the checks',
   assert.equal(status, 'draft',
     'a listing with no photo and no stock must not be able to make itself live');
 });
+
+/* --------------------------------------------- buyer reads, reports, stats -- */
+
+async function makeLiveCatalogue() {
+  // A second active seller with live stock, so ranking and search have
+  // something to rank and search.
+  const [[sid]] = await sql(
+    `insert into sellers (brand_name, city, status) values ('Deck Shop','Karachi','active') returning id;`);
+  await sql(`insert into seller_contacts (seller_id, user_id, owner_name, phone, address)
+             values ('${sid}', gen_random_uuid(), 'D', '03005556666', 'x');`);
+  for (const [title, interest, price] of [
+    ['Chikankari Kurta', 'clothing', 3400],
+    ['Handblock Lawn Suit', 'clothing', 5200],
+    ['Kashmiri Chai Blend', 'food', 1200],
+    ['Riso Print Quarterly', 'magazines', 900]
+  ]) {
+    const [[pid]] = await sql(
+      `insert into products (seller_id, title, price, interest, city, stock, status, tags)
+       values ('${sid}', '${title}', ${price}, '${interest}', 'Karachi', 5, 'live', array['${interest}'])
+       returning id;`);
+    await sql(`insert into photos (product_id, position, key) values ('${pid}', 0, 'k/${pid}');`);
+  }
+  return sid;
+}
+
+test('the deck ranks on interest and promotion, and never returns a seen card', async () => {
+  await makeLiveCatalogue();
+  // An earlier test promotes a listing, and promotion is a ranking term — so
+  // clear it here or this test is asserting the wrong thing intermittently.
+  await sql(`update products set promoted = false;`);
+  const [[out]] = await sql(`select deck(array['food']::text[], '{}'::uuid[], 10, 0)::text;`, { role: 'anon' });
+  const page = JSON.parse(out);
+  assert.ok(page.items.length > 0);
+  assert.equal(page.items[0].interest, 'food', 'the tapped interest should come first');
+  assert.ok(page.items[0].photo_keys.length > 0, 'cards need a photo to be worth swiping');
+  assert.ok(page.items[0].seller.brand_name, 'and a shop name');
+
+  const first = page.items[0].id;
+  const [[next]] = await sql(`select deck(array['food']::text[], array['${first}']::uuid[], 10, 0)::text;`, { role: 'anon' });
+  assert.ok(!JSON.parse(next).items.some(p => p.id === first), 'a seen card must not come back');
+
+  // Promotion is what sellers pay for, so it has to actually move a card up.
+  const [[plain]] = await sql(`select deck('{}'::text[], '{}'::uuid[], 50, 0)::text;`, { role: 'anon' });
+  const before = JSON.parse(plain).items.findIndex(p => p.title === 'Riso Print Quarterly');
+  const [[rid]] = await sql(`select id from products where title = 'Riso Print Quarterly';`);
+  await sql(`update products set promoted = true where id = '${rid}';`);
+  const [[lifted]] = await sql(`select deck('{}'::text[], '{}'::uuid[], 50, 0)::text;`, { role: 'anon' });
+  const after = JSON.parse(lifted).items.findIndex(p => p.title === 'Riso Print Quarterly');
+  assert.ok(after < before, `promoting should lift a card: was ${before}, now ${after}`);
+  await sql(`update products set promoted = false where id = '${rid}';`);
+});
+
+test('the deck never offers something out of stock or from a suspended shop', async () => {
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Deck Shop';`);
+  const [[pid]] = await sql(`select id from products where title = 'Kashmiri Chai Blend';`);
+  await sql(`update products set stock = 0 where id = '${pid}';`);
+  let [[out]] = await sql(`select deck('{}'::text[], '{}'::uuid[], 50, 0)::text;`, { role: 'anon' });
+  assert.ok(!JSON.parse(out).items.some(p => p.id === pid), 'sold out must leave the deck');
+  await sql(`update products set stock = 5 where id = '${pid}';`);
+
+  await sql(`update sellers set status = 'suspended' where id = '${sid}';`);
+  [[out]] = await sql(`select deck('{}'::text[], '{}'::uuid[], 50, 0)::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(out).items.filter(p => p.seller.id === sid).length, 0,
+    'a suspended shop must vanish from the deck');
+  await sql(`update sellers set status = 'active' where id = '${sid}';`);
+});
+
+test('search finds by word, by shop, and through a typo', async () => {
+  const hits = async q => {
+    const [[out]] = await sql(`select search_products('${q}', 20)::text;`, { role: 'anon' });
+    return JSON.parse(out).items.map(p => p.title);
+  };
+  assert.ok((await hits('kurta')).includes('Chikankari Kurta'), 'plain word');
+  assert.ok((await hits('Deck Shop')).length > 0, 'by shop name');
+  assert.ok((await hits('kurat')).includes('Chikankari Kurta'), 'trigram should survive a typo');
+  assert.equal((await hits('zzzznothing')).length, 0, 'and find nothing when there is nothing');
+});
+
+test('browse and products_by_id return only what a buyer may see', async () => {
+  const [[out]] = await sql(`select browse('clothing', 50, 0)::text;`, { role: 'anon' });
+  const items = JSON.parse(out).items;
+  assert.ok(items.length >= 2);
+  assert.ok(items.every(p => p.interest === 'clothing'));
+
+  // A wishlist keeps its order, and a listing taken down simply drops out.
+  const ids = items.map(p => p.id);
+  await sql(`update products set status = 'removed' where id = '${ids[0]}';`);
+  const [[byId]] = await sql(`select products_by_id(array['${ids[0]}','${ids[1]}']::uuid[])::text;`, { role: 'anon' });
+  const back = JSON.parse(byId);
+  assert.equal(back.length, 1, 'a removed listing must fall out of a wishlist');
+  assert.equal(back[0].id, ids[1]);
+  await sql(`update products set status = 'live' where id = '${ids[0]}';`);
+});
+
+test('a buyer can report a listing, once, and not a hundred times', async () => {
+  const [[pid]] = await sql(`select id from products where title = 'Chikankari Kurta';`);
+  const [[first]] = await sql(`select report_listing('${pid}', 'device-a', 'counterfeit', 'looks fake')::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(first).already, false);
+
+  const [[again]] = await sql(`select report_listing('${pid}', 'device-a', 'counterfeit', '')::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(again).already, true, 'reporting twice is not two problems');
+
+  assert.match(await fails(`select report_listing('${pid}', 'device-a', 'because-i-said-so', '');`, { role: 'anon' }),
+    /reason we recognise/);
+
+  // Ten in an hour from one device is not reporting, it is attacking a rival.
+  for (let i = 0; i < 10; i++) {
+    const [[p]] = await sql(`insert into products (seller_id, title, price, interest, city, stock, status)
+      select seller_id, 'Spam Target ${i}', 100, 'clothing', 'Karachi', 1, 'live' from products where id = '${pid}' returning id;`);
+    await sql(`select report_listing('${p}', 'device-spam', 'scam', '');`, { role: 'anon' }).catch(() => {});
+  }
+  assert.match(await fails(`select report_listing('${pid}', 'device-spam', 'scam', '');`, { role: 'anon' }),
+    /too many reports/);
+});
+
+test('nobody can read the reports table, and only an admin sees the queue', async () => {
+  assert.match(await fails('select * from reports;', { role: 'anon' }), /permission denied/i);
+  assert.match(await fails('select * from reports;', { role: 'authenticated', uid: userA }), /permission denied/i);
+  assert.match(await fails(`select admin_reports('open');`, { role: 'authenticated', uid: userA, email: 'seller@nova.test' }),
+    /not permitted/);
+
+  const [[out]] = await sql(`select admin_reports('open')::text;`, { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  const open = JSON.parse(out);
+  assert.ok(open.length > 0);
+  assert.ok(open[0].title && open[0].seller, 'a report is useless without the listing and the shop');
+
+  const [[status]] = await sql(`select admin_resolve_report('${open[0].id}', 'dismissed');`,
+                               { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  assert.equal(status, 'dismissed');
+});
+
+test('events are collapsed into one row per product per day', async () => {
+  const [[pid]] = await sql(`select id from products where title = 'Handblock Lawn Suit';`);
+  const batch = JSON.stringify([
+    ...Array(40).fill({ type: 'impression', product_id: pid }),
+    ...Array(7).fill({ type: 'keep', product_id: pid }),
+    { type: 'detail', product_id: pid },
+    { type: 'add_to_bag', product_id: pid },
+    { type: 'nonsense', product_id: pid },
+    { type: 'impression', product_id: '00000000-0000-0000-0000-000000000000' }
+  ]);
+  await sql(`select record_events('${batch}'::jsonb);`, { role: 'anon' });
+
+  const rows = await sql(`select impressions, keeps, detail_views, adds from product_stats
+                          where product_id = '${pid}' and day = current_date;`);
+  assert.equal(rows.length, 1, '49 events must be one row, not 49');
+  assert.deepEqual(rows[0], ['40', '7', '1', '1']);
+
+  // A second batch adds to the same row rather than starting another.
+  await sql(`select record_events('${JSON.stringify([{ type: 'keep', product_id: pid }])}'::jsonb);`, { role: 'anon' });
+  const [[keeps]] = await sql(`select keeps from product_stats where product_id = '${pid}' and day = current_date;`);
+  assert.equal(keeps, '8');
+});
+
+test('a seller sees insights for their own listings only', async () => {
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Deck Shop';`);
+  const [[uid]] = await sql(`select user_id from seller_contacts where seller_id = '${sid}';`);
+  const [[out]] = await sql(`select my_insights(30)::text;`, { role: 'authenticated', uid });
+  const ins = JSON.parse(out);
+  assert.ok(ins.totals.impressions >= 40);
+  assert.ok(ins.products.length >= 4);
+  assert.ok(ins.products.every(p => p.title), 'every row needs a name the seller recognises');
+
+  // Another seller's numbers must not appear in it.
+  const [[otherOut]] = await sql(`select my_insights(30)::text;`, { role: 'authenticated', uid: userA });
+  const mine = new Set(ins.products.map(p => p.id));
+  assert.ok(!JSON.parse(otherOut).products.some(p => mine.has(p.id)),
+    'two sellers must never see the same listing in their insights');
+});

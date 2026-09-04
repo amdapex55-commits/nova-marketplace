@@ -103,21 +103,23 @@ send; `get_order` returned `null` for the right code with the wrong phone.
 
 ## The data seam
 
-`config.js` still has an empty `SUPABASE_URL`, so `api.js` runs off
-`public/data/catalog.json`. **Do not fill it in yet.** The write path is wired
-to the real project — `placeOrder`, `order` and `track` all branch on `live()` —
-but the READ path is not: `deck`, `browse`, `search`, `product`, `products` and
-`sellers` still read fixtures unconditionally. Switching the URL on today would
-hand fixture product ids to a real `place_order` and every order would fail.
+`BUYER_BACKEND` in `config.js` picks the backend, and it is now **`live`**:
+every read goes through PostgREST. Setting it back to `fixtures` runs the whole
+app off `public/data/catalog.json` with no database at all, which is how to demo
+it offline — that catalogue is kept for exactly that.
 
-Two things have to happen first, in this order:
+Ranking, search and the storefront shape live in SQL
+(`20260904110001_buyer_reads.sql`) so the two backends cannot drift: `deck()`
+ranks on interest, then promotion, then freshness, then a per-product jitter,
+and `api.js` mirrors the same formula for fixtures.
 
-1. **Wire the read path** in `api.js` to PostgREST — the deck query, the browse
-   list, `search` against the `search` tsvector plus `pg_trgm`, and the product
-   fetch with its photos.
-2. **Get real rows in.** The demo catalogue is placeholder artwork and should
-   never appear on a live storefront as if it were stock. Real products arrive
-   with the seller workspace (Phase 1) and the R2 upload pipeline.
+**Photographs are returned as object keys, never URLs.** `api.js` appends the
+variant and the bucket base, so moving to R2 changes one line.
+
+`scripts/seed-live.py` puts a demo shop with real WebP photographs into the live
+project — `--clear` removes exactly what it made. It resumes on title **and**
+photograph, because a run that dies mid-upload leaves a product with no image,
+and every read path hides those.
 
 Both prerequisites are now written and tested in `supabase/`:
 
@@ -225,6 +227,39 @@ What this costs, and it is real:
 Connect a provider (Resend, Brevo) and this is the first thing to reverse: set
 `mailer_autoconfirm` false, and `signUp()` starts returning no session — it
 already falls back to signing in, so handle the confirmation case there.
+
+## Reporting, and the legal page
+
+Every listing has a report control. `report_listing()` takes one reason and an
+optional line, collapses repeat reports from the same device, and refuses more
+than ten an hour from one device — that is a competitor, not a shopper. Nobody
+can read `reports` through the API; the control suite reads it through
+`admin_reports()`, where taking a listing down and closing the report are one
+click, because two buttons make half-done queues.
+
+`#/legal` is one screen rather than three pages: who you are buying from, who
+holds the money (nobody — the seller collects), what to do at the door, what may
+not be sold, and what we keep about you. Meta wants terms and a privacy
+statement reachable before they will run ads, and these are the things that
+actually cause arguments.
+
+## Insights
+
+`record_events()` collapses a batch into one row per product per day. Never one
+row per view: an impression per card per swipe is millions of writes a month, a
+500 MB database will not take it, and the seller only sees the daily number.
+
+The client buffers and flushes on three triggers — a 10s interval,
+`visibilitychange`, and `pagehide`. **Not `navigator.sendBeacon`**: it cannot
+send `application/json` cross-origin, because that content type is not
+CORS-safelisted and a beacon cannot perform the preflight. It returns true and
+nothing arrives. `fetch` with `keepalive` survives the unload and is a normal,
+preflightable request.
+
+`my_insights()` answers the question a seller is actually asking on day 25:
+seen, saved, opened, ordered — plus a save rate, which is the honest signal.
+Plenty of impressions and almost no saves means the photograph or the price is
+the problem, not the reach.
 
 ## Not built yet
 

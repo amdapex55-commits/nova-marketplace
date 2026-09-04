@@ -1,27 +1,66 @@
 /* The one place the app talks to data.
  *
  * Two backends behind one interface:
- *   fixtures  — public/data/catalog.json, used while SUPABASE_URL is empty
- *   postgrest — Supabase, once Phase 0 exists
+ *   fixtures  — public/data/catalog.json, the demo catalogue
+ *   live      — the Supabase project, through PostgREST
  *
  * Every function returns the same shape from either, so no screen knows which
- * one it is on. Swapping is a URL in config.js, not a rewrite.
+ * one it is on. Which is used is `BUYER_BACKEND` in config.js and nothing else —
+ * deliberately not "is a Supabase URL configured", because the seller workspace
+ * needs the project long before the buyer app is ready for it.
  */
 import { store } from './store.js';
 
 const cfg = () => window.NOVAMKT;
-/* A real Supabase project now exists and seller.html uses it — but the buyer
-   app's read path still comes from fixtures, so this must not key off the URL
-   being present. See BUYER_BACKEND in config.js. */
 const live = () => cfg().BUYER_BACKEND === 'live' && !!cfg().SUPABASE_URL;
+
+/* ------------------------------------------------------------------ live --- */
+
+async function rpc(name, args = {}) {
+  const res = await fetch(new URL(`/rest/v1/rpc/${name}`, cfg().SUPABASE_URL), {
+    method: 'POST',
+    headers: {
+      apikey: cfg().SUPABASE_ANON_KEY,
+      authorization: `Bearer ${cfg().SUPABASE_ANON_KEY}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(args)
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    let message = `${name} failed`;
+    try { message = JSON.parse(body).message || message; } catch { /* keep the default */ }
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/* Photographs are stored as object keys, not URLs, so that moving the bucket to
+   R2 later changes this one line and nothing else. The three variants are an
+   implementation detail of serving; the app asks for a size. */
+const PHOTO_BASE = () => `${cfg().SUPABASE_URL}/storage/v1/object/public/product-photos`;
+const photoUrls = keys => (keys || []).map(k => `${PHOTO_BASE()}/${k}-card.webp`);
+
+/* Live rows arrive with `photo_keys`; fixtures arrive with ready-made relative
+   paths. Both leave here as `photos`, a plain array of URLs. */
+const fromLive = p => p && ({ ...p, photos: photoUrls(p.photo_keys) });
+
+/* The device's seen-ledger runs to thousands of ids. Sending all of them on
+   every deck request would cost more than the page it fetches, so the server
+   gets the most recent slice and the client filters whatever slips past against
+   its full copy. Cheap at both ends, and correct at both ends. */
+const SEEN_TO_SEND = 250;
+
+/* -------------------------------------------------------------- fixtures --- */
 
 let cache = null;
 async function catalog() {
   if (!cache) {
     // Relative, not absolute: the site is served from a subpath on GitHub Pages
-    // (/nova-marketplace/) and from the root on Cloudflare. Hash routing means
-    // the document URL never changes, so a relative path resolves correctly in
-    // both. Every asset path in the catalogue is relative for the same reason.
+    // and from the root on Cloudflare. Hash routing means the document URL
+    // never changes, so a relative path resolves correctly in both.
     const res = await fetch('data/catalog.json');
     if (!res.ok) throw new Error(`catalog ${res.status}`);
     cache = await res.json();
@@ -31,51 +70,58 @@ async function catalog() {
   return cache;
 }
 
-async function rest(path, params = {}) {
-  const url = new URL(`/rest/v1/${path}`, cfg().SUPABASE_URL);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url, {
-    headers: { apikey: cfg().SUPABASE_ANON_KEY, authorization: `Bearer ${cfg().SUPABASE_ANON_KEY}` }
-  });
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
-  return res.json();
-}
+const hydrate = (c, p) => ({ ...p, seller: c.bySeller.get(p.seller_id) });
 
-/* Rank, never filter, on interests.
- *
- * A buyer who taps only "Print" would get a nine-card deck from a filter and
- * would leave. Interest overlap is the strongest term, freshness next, and a
- * deterministic per-product jitter breaks ties so the deck is not the same
- * order for everyone. Nothing is ever excluded for taste — only for having
- * already been seen. */
+/* Ranking for the fixture backend, mirroring deck() in
+   20260904110001_buyer_reads.sql. Interest overlap first, then promotion, then
+   freshness, then a deterministic jitter. */
 function rank(products, { interests = [], seen = new Set() }) {
-  const jitter = id => (([...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7) >>> 0) % 1000) / 1000;
+  const jitter = id => (([...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7) >>> 0) % 1000) / 1250;
   const now = Date.now();
   return products
     .filter(p => p.status === 'live' && !seen.has(p.id))
-    .map(p => {
-      const match = interests.includes(p.interest) ? 1 : 0;
-      const ageDays = (now - Date.parse(p.created_at)) / 86400000;
-      const fresh = Math.max(0, 1 - ageDays / 90);
-      return { p, score: match * 3 + fresh * 1.2 + jitter(p.id) * 0.8 };
-    })
+    .map(p => ({
+      p,
+      score: (interests.includes(p.interest) ? 3 : 0)
+           + (p.promoted ? 1.5 : 0)
+           + Math.max(0, 1 - (now - Date.parse(p.created_at)) / 7776000000) * 1.2
+           + jitter(p.id)
+    }))
     .sort((a, b) => b.score - a.score)
     .map(x => x.p);
 }
 
-const hydrate = (c, p) => ({ ...p, seller: c.bySeller.get(p.seller_id) });
+/* ------------------------------------------------------------------- api --- */
 
 export const api = {
   async meta() {
+    const interests = [
+      { id: 'clothing', label: 'Clothing', hint: 'Everyday, festive, handmade' },
+      { id: 'sports', label: 'Sport', hint: 'Training, outdoors, gear' },
+      { id: 'food', label: 'Food', hint: 'Pantry, chai, gifting' },
+      { id: 'magazines', label: 'Print', hint: 'Zines, journals, collectibles' }
+    ];
+    if (live()) {
+      const front = await rpc('storefront');
+      return { interests, cities: cfg().CITIES, sellers: front.sellers, liveProducts: front.live_products };
+    }
     const c = await catalog();
     return { interests: c.interests, cities: c.cities, sellers: c.sellers };
   },
 
-  /* One page of the swipe deck. `seen` comes from the device, not the server —
-     see store.js. */
   async deck({ limit = cfg().DECK_PAGE, offset = 0 } = {}) {
-    const c = await catalog();
     const { interests, seen } = store.get();
+    if (live()) {
+      const page = await rpc('deck', {
+        p_interests: interests,
+        p_seen: seen.slice(-SEEN_TO_SEND),
+        p_limit: limit,
+        p_offset: offset
+      });
+      const set = new Set(seen);
+      return { items: page.items.map(fromLive).filter(p => !set.has(p.id)), remaining: page.remaining };
+    }
+    const c = await catalog();
     const ranked = rank(c.products, { interests, seen: new Set(seen) });
     return {
       items: ranked.slice(offset, offset + limit).map(p => hydrate(c, p)),
@@ -83,20 +129,26 @@ export const api = {
     };
   },
 
-  /* The home grid: newest first, optionally narrowed by interest — here a
-     filter IS what the buyer asked for, because they tapped the chip. */
   async browse({ interest = null, limit = 60, offset = 0 } = {}) {
+    if (live()) {
+      const out = await rpc('browse', { p_interest: interest, p_limit: limit, p_offset: offset });
+      return { items: out.items.map(fromLive), total: out.total };
+    }
     const c = await catalog();
     const items = c.products
       .filter(p => p.status === 'live' && (!interest || p.interest === interest))
-      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+      .sort((a, b) => (b.promoted === true) - (a.promoted === true) || Date.parse(b.created_at) - Date.parse(a.created_at));
     return { items: items.slice(offset, offset + limit).map(p => hydrate(c, p)), total: items.length };
   },
 
-  /* Standing in for Postgres full-text search. The live version is a tsvector
-     + GIN index with pg_trgm for typos; deliberately NOT `ilike '%q%'`, which
-     cannot use an index and degrades the moment the catalogue is real. */
   async search(q) {
+    if (live()) {
+      const out = await rpc('search_products', { p_q: q, p_limit: 60 });
+      return { items: out.items.map(fromLive) };
+    }
+    // Stands in for the Postgres full-text + trigram search. Deliberately never
+    // `ilike '%q%'`, which cannot use an index and degrades the moment the
+    // catalogue is real.
     const c = await catalog();
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return { items: [] };
@@ -116,38 +168,41 @@ export const api = {
   },
 
   async product(id) {
+    if (live()) return fromLive(await rpc('product_json', { p_id: id }));
     const c = await catalog();
     const p = c.byId.get(id);
     return p ? hydrate(c, p) : null;
   },
 
   async products(ids) {
+    if (!ids.length) return [];
+    if (live()) return (await rpc('products_by_id', { p_ids: ids })).map(fromLive);
     const c = await catalog();
     return ids.map(id => c.byId.get(id)).filter(Boolean).map(p => hydrate(c, p));
   },
 
-  async sellers() { return (await catalog()).sellers; },
+  async sellers() {
+    if (live()) return (await rpc('storefront')).sellers;
+    return (await catalog()).sellers;
+  },
 
   /* Placing an order.
    *
-   * Fixture mode keeps orders in localStorage so the confirmation and the
-   * order-lookup screen are real and testable end to end. In live mode this
-   * becomes a single Postgres RPC — one transaction that re-reads prices and
-   * stock server-side, splits the bag into shipments and writes them, because
-   * a price that came from the browser is a price an attacker chose. */
+   * Live, this is one Postgres transaction that re-reads prices and stock, so
+   * the browser sends ids and quantities and never a price — a price that came
+   * from a browser is a price an attacker chose. The client-side arithmetic in
+   * checkout.js is for showing the buyer what they are agreeing to.
+   */
   async placeOrder(order) {
     if (live()) {
-      const res = await fetch(new URL('/rest/v1/rpc/place_order', cfg().SUPABASE_URL), {
-        method: 'POST',
-        headers: {
-          apikey: cfg().SUPABASE_ANON_KEY,
-          authorization: `Bearer ${cfg().SUPABASE_ANON_KEY}`,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify(order)
+      return rpc('place_order', {
+        payload: {
+          contact: order.contact,
+          express: order.express,
+          payment: order.payment,
+          lines: order.lines
+        }
       });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
     }
     const key = 'nova.orders.v1';
     const all = JSON.parse(localStorage.getItem(key) || '{}');
@@ -156,29 +211,25 @@ export const api = {
     return order;
   },
 
-  /* Reading an order back needs the phone as well as the code, matching
-     get_order(code, phone) in 0003_place_order.sql: a guessed or
-     shoulder-surfed code on its own must reveal nothing. Passing no phone is
-     only for this device's own confirmation screen, straight after placing. */
+  /* Reading an order back needs the phone as well as the code — a guessed or
+     shoulder-surfed code on its own must reveal nothing. */
   async order(code, phone = null) {
     if (live()) {
-      const res = await fetch(new URL('/rest/v1/rpc/get_order', cfg().SUPABASE_URL), {
-        method: 'POST',
-        headers: {
-          apikey: cfg().SUPABASE_ANON_KEY,
-          authorization: `Bearer ${cfg().SUPABASE_ANON_KEY}`,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({ p_code: code, p_phone: phone })
-      });
-      if (!res.ok) return null;
-      return (await res.json()) || null;
+      try { return await rpc('get_order', { p_code: code, p_phone: phone }); }
+      catch { return null; }
     }
     const all = JSON.parse(localStorage.getItem('nova.orders.v1') || '{}');
     const found = all[String(code || '').trim().toUpperCase()] || null;
     if (!found) return null;
     if (phone !== null && found.contact.phone !== phone) return null;
     return found;
+  },
+
+  async reportListing(productId, reason, detail = '') {
+    if (!live()) return { already: false };
+    return rpc('report_listing', {
+      p_product: productId, p_device: store.deviceId(), p_reason: reason, p_detail: detail
+    });
   },
 
   /* Impressions and swipes are buffered and flushed in batches — one row per
@@ -189,17 +240,42 @@ export const api = {
     let buffer = [];
     const flush = () => {
       if (!buffer.length) return;
-      const batch = buffer; buffer = [];
+      const batch = buffer;
+      buffer = [];
       if (!live()) { console.debug('[track]', batch.length, 'events'); return; }
-      navigator.sendBeacon?.(
-        new URL('/rest/v1/rpc/record_events', cfg().SUPABASE_URL),
-        new Blob([JSON.stringify({ events: batch })], { type: 'application/json' })
-      );
+
+      // fetch with keepalive, NOT navigator.sendBeacon.
+      //
+      // sendBeacon looks like the right tool — it is built for exactly this —
+      // but it cannot send `application/json` cross-origin: that content type
+      // is not CORS-safelisted, so the request needs a preflight and a beacon
+      // cannot perform one. It returns true, queues nothing, and the numbers
+      // silently never arrive. keepalive gives the same survives-the-unload
+      // behaviour through a normal, preflightable request.
+      fetch(new URL('/rest/v1/rpc/record_events', cfg().SUPABASE_URL), {
+        method: 'POST',
+        keepalive: true,
+        headers: {
+          apikey: cfg().SUPABASE_ANON_KEY,
+          authorization: `Bearer ${cfg().SUPABASE_ANON_KEY}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ events: batch })
+      }).catch(() => { /* analytics must never break a purchase */ });
     };
+
     setInterval(flush, 10000);
+    // Three triggers, because each misses a case the others catch:
+    //   visibilitychange  the tab is backgrounded — the common one on a phone
+    //   pagehide          the page is actually going away, including a
+    //                     same-tab navigation, which visibilitychange does NOT
+    //                     fire for. Without it the last buffer of every session
+    //                     was silently dropped.
+    //   the interval      everything else, for a long session on one screen
     addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+    addEventListener('pagehide', flush);
     return (type, product_id) => {
-      buffer.push({ type, product_id, at: Date.now() });
+      buffer.push({ type, product_id });
       if (buffer.length >= 50) flush();
     };
   })()

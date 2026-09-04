@@ -189,6 +189,53 @@ async function listings(refresh, status) {
   return wrap;
 }
 
+/* ---------------------------------------------------------------- reports -- */
+async function reports(refresh) {
+  const rows = await rpc('admin_reports', { p_status: 'open' });
+  const wrap = el('<div class="rows"></div>');
+  if (!rows.length) {
+    wrap.append(el('<div class="empty"><h2>Nothing reported</h2><p>Buyers can report any listing. What they send lands here.</p></div>'));
+    return wrap;
+  }
+  for (const r of rows) {
+    const row = el(`
+      <div class="row admin-row">
+        <div class="ph mono">!</div>
+        <div>
+          <h3>${esc(r.title)} <span class="state pending">${esc(r.reason)}</span>${
+            r.others > 0 ? `<span class="state refused">${r.others + 1} reports</span>` : ''}</h3>
+          <div class="meta"><span>${esc(r.seller)}</span><span>·</span><span class="state ${esc(r.product_status)}">${esc(r.product_status)}</span><span>·</span><span>${fmtFull(r.created_at)}</span></div>
+          ${r.detail ? `<div class="meta addr">“${esc(r.detail)}”</div>` : ''}
+        </div>
+        <div class="acts"></div>
+      </div>`);
+    const acts = row.querySelector('.acts');
+    const act = (label, fn, cls = '') => {
+      const b = el(`<button class="${cls}">${label}</button>`);
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try { await fn(); await refresh(); } catch (e) { fail(e); b.disabled = false; }
+      });
+      acts.append(b);
+    };
+    if (r.product_status === 'live') {
+      act('Take down', async () => {
+        // Taking the listing down and closing the report are one decision, so
+        // they are one click. Two buttons means half-done queues.
+        await rpc('admin_set_product_status', { p_product: r.product_id, p_status: 'removed' });
+        await rpc('admin_resolve_report', { p_report: r.id, p_status: 'actioned' });
+        toast('Taken down');
+      }, 'warn');
+    }
+    act('Dismiss', async () => {
+      await rpc('admin_resolve_report', { p_report: r.id, p_status: 'dismissed' });
+      toast('Dismissed');
+    });
+    wrap.append(row);
+  }
+  return wrap;
+}
+
 /* ----------------------------------------------------------------- orders -- */
 async function orders() {
   const rows = await rpc('admin_orders', { p_limit: 60 });
@@ -241,6 +288,7 @@ export async function adminSuite({ alsoASeller, onSwitchToShop }) {
           <button data-tab="queue">Queue<span class="count num">${stats.sellers_pending + stats.listings_pending}</span></button>
           <button data-tab="sellers">Shops<span class="count num">${stats.sellers_active}</span></button>
           <button data-tab="listings">Listings<span class="count num">${stats.listings_live}</span></button>
+          <button data-tab="reports">Reports<span class="count num">${stats.reports_open}</span></button>
           <button data-tab="orders">Orders<span class="count num">${stats.orders_total}</span></button>
         </nav>
         <dl class="stats four">
@@ -260,6 +308,13 @@ export async function adminSuite({ alsoASeller, onSwitchToShop }) {
     app.replaceChildren(shell);
     const pane = shell.querySelector('#pane');
 
+    if (stats.reports_open > 0 && tab === 'queue') {
+      const n = el(`<div class="notice bad"><div><b>${stats.reports_open} reported listing${
+        stats.reports_open === 1 ? '' : 's'}.</b> A buyer flagged something — worth looking before anything else.</div></div>`);
+      n.style.cursor = 'pointer';
+      n.addEventListener('click', () => { tab = 'reports'; render(); });
+      pane.append(n);
+    }
     if (stats.trials_ending > 0 && tab === 'queue') {
       pane.append(el(`
         <div class="notice warn">
@@ -285,6 +340,8 @@ export async function adminSuite({ alsoASeller, onSwitchToShop }) {
     } else if (tab === 'listings') {
       chips([[null, 'All'], ['live', 'Live'], ['pending', 'Waiting'], ['removed', 'Taken down']]);
       pane.append(await listings(render, filter));
+    } else if (tab === 'reports') {
+      pane.append(await reports(render));
     } else {
       pane.append(await orders());
     }

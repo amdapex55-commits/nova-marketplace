@@ -473,6 +473,62 @@ async function orders() {
   return wrap;
 }
 
+/* ----------------------------------------------------------------- insights */
+/* This is the screen a seller opens on day 25, deciding whether to pay. So it
+   answers that directly and in their words: how many people saw it, how many
+   saved it, how many bought it. No charts — a number they can act on beats a
+   graph they have to interpret. */
+async function insights() {
+  const data = await rpc('my_insights', { p_days: 30 });
+  const wrap = el('<div></div>');
+  const t = data.totals;
+
+  wrap.append(el(`
+    <dl class="stats four">
+      <div><dt>Seen</dt><dd class="num">${t.impressions.toLocaleString('en-PK')}</dd></div>
+      <div><dt>Saved</dt><dd class="num">${t.keeps.toLocaleString('en-PK')}</dd></div>
+      <div><dt>Opened</dt><dd class="num">${t.detail_views.toLocaleString('en-PK')}</dd></div>
+      <div><dt>Sold</dt><dd class="num">${money(t.sold)}</dd></div>
+    </dl>`));
+
+  if (!t.impressions) {
+    wrap.append(el(`
+      <div class="notice info">
+        <div>Nothing to show yet — these fill up once your listings are live and
+        buyers start swiping. <b>Seen</b> is how many times a card appeared,
+        <b>saved</b> is a swipe right.</div>
+      </div>`));
+  }
+
+  const rows = el('<div class="group"><header><h2>Last 30 days</h2><span class="note">per listing</span></header></div>');
+  if (!data.products.length) {
+    rows.append(el('<div class="empty"><h2>No listings yet</h2><p>Add one and its numbers appear here.</p></div>'));
+  }
+  for (const p of data.products) {
+    // Save rate is the honest signal: plenty of impressions and almost no saves
+    // means the photograph or the price is the problem, not the reach.
+    const rate = p.impressions ? Math.round((p.keeps / p.impressions) * 100) : null;
+    rows.append(el(`
+      <div class="row">
+        <div class="ph">${p.photo_key ? `<img src="${esc(photoUrl(p.photo_key))}" alt="" loading="lazy">` : 'no photo'}</div>
+        <div>
+          <h3>${esc(p.title)} <span class="state ${esc(p.status)}">${esc(p.status)}</span>${p.promoted ? '<span class="state live">promoted</span>' : ''}</h3>
+          <div class="meta">
+            <span><b class="num">${p.impressions}</b> seen</span><span>·</span>
+            <span><b class="num">${p.keeps}</b> saved</span><span>·</span>
+            <span><b class="num">${p.detail_views}</b> opened</span><span>·</span>
+            <span><b class="num">${p.ordered}</b> ordered</span>
+          </div>
+          ${rate !== null ? `<div class="meta"><span>${rate}% of the people who saw it saved it${
+            p.impressions >= 30 && rate < 5 ? ' — worth trying a different first photo' : ''}</span></div>` : ''}
+        </div>
+        <div class="acts"></div>
+      </div>`));
+  }
+  wrap.append(rows);
+  return wrap;
+}
+
 /* --------------------------------------------------------------------- shop */
 
 function shop() {
@@ -543,6 +599,7 @@ async function render() {
       <nav class="nav">
         <button data-tab="listings">Listings<span class="count num">${me.products}</span></button>
         <button data-tab="orders">Orders<span class="count num">${me.open_orders}</span></button>
+        <button data-tab="insights">Insights</button>
         <button data-tab="shop">Shop</button>
       </nav>
       <dl class="stats">
@@ -578,6 +635,8 @@ async function render() {
     pane.append(add, await listings());
   } else if (tab === 'orders') {
     pane.append(await orders());
+  } else if (tab === 'insights') {
+    pane.append(await insights());
   } else {
     pane.append(shop());
   }
