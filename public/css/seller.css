@@ -2,7 +2,18 @@
    has no use for. Same palette, wider frame: a seller is usually at a desk with
    a spreadsheet open, while a buyer is one-handed on a phone. */
 
-body.seller #app { max-width: 780px; }
+/* The buyer app is a fixed-height shell because its tab bar and Place-order
+   button must never move. A desk tool is the opposite: the seller and control
+   screens are lists that grow, so the document scrolls and the app frame grows
+   with it. Inheriting the buyer's height:100dvh + overflow:hidden made every
+   row past the first screenful unreachable — invisible with three listings,
+   fatal with thirty. */
+body.seller #app {
+  max-width: 780px;
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+}
 
 .boot { display: grid; place-items: center; gap: 12px; min-height: 60dvh; color: var(--ink-faint); }
 .spinner {
@@ -105,3 +116,19 @@ body.seller #app { max-width: 780px; }
 }
 .sheet-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 15px 16px; background: var(--paper); border-bottom: 1px solid var(--rule); }
 .sheet-bar h2 { font-size: 18px; flex: 1; }
+
+/* ------------------------------------------------------------------ admin -- */
+.stats.four { grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 620px) { .stats.four { grid-template-columns: repeat(4, 1fr); } }
+.stats.four dd { font-size: 19px; }
+
+.admin-row .ph.mono {
+  display: grid; place-items: center;
+  font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700;
+  font-size: 19px; letter-spacing: -.02em; color: var(--emerald);
+  background: var(--emerald-soft); aspect-ratio: 1; width: 64px;
+}
+.admin-row h3 { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.admin-row .meta a { color: var(--emerald); font-weight: 600; }
+.admin-row .meta.addr { color: var(--ink-faint); font-size: 12px; }
+.admin .chips { padding: 12px 14px; }

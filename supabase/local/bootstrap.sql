@@ -21,6 +21,13 @@ create or replace function auth.uid() returns uuid
   select nullif(current_setting('request.jwt.uid', true), '')::uuid
 $$;
 
+-- Supabase's auth.jwt() is the whole JWT claim set. is_admin() reads the email
+-- out of it, so the harness has to be able to set one.
+create or replace function auth.jwt() returns jsonb
+  language sql stable as $$
+  select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb)
+$$;
+
 do $$ begin
   create role anon nologin;
 exception when duplicate_object then null; end $$;
@@ -30,6 +37,7 @@ exception when duplicate_object then null; end $$;
 
 grant usage on schema public, auth to anon, authenticated;
 grant execute on function auth.uid() to anon, authenticated;
+grant execute on function auth.jwt() to anon, authenticated;
 
 -- The permissive defaults, exactly as Supabase leaves them.
 grant all on all tables    in schema public to anon, authenticated;

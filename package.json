@@ -13,6 +13,7 @@
     "deploy": "npx wrangler deploy",
     "test:db": "node --test scripts/db.test.mjs",
     "icons": "python3 scripts/make-icons.py",
-    "check": "npm test && npm run test:db"
+    "check": "npm run lint && npm test && npm run test:db",
+    "lint": "node scripts/lint-css.mjs"
   }
 }

@@ -36,7 +36,9 @@ that never ships.
       js/checkout.js   bag, checkout, confirmation
       js/money.mjs     order arithmetic — pure, and covered by tests
       seller.html      the seller workspace (separate entry point)
-      js/seller/       sb.js (tiny Supabase client) · photos.js (resize) · app.js
+      js/seller/       sb.js (tiny Supabase client) · photos.js (resize) · app.js · admin.js
+      js/motion.js     the moving parts that need to know where things are
+      css/motion.css   the motion system
       data/catalog.json  demo catalogue (generated)
     supabase/
       migrations/      0001 schema · 0002 RLS · 0003 place_order
@@ -159,6 +161,46 @@ warns when it is short.
 **Approving a seller has no UI yet.** Until the admin panel exists:
 
     update sellers set status = 'active' where brand_name = '…';
+
+## Motion
+
+`css/motion.css` and `js/motion.js`. One idea runs through it: **the dot**. It
+orbits on the splash, it is the pip on the tab bar, it bursts when something is
+saved, it flies into the bag, it draws the tick on a placed order, and it rings
+a photograph while it uploads. A single mark doing every job is what stops a
+handful of screens feeling like a handful of screens.
+
+Transform and opacity only, so none of it triggers layout. Everything
+decorative is `aria-hidden` and `pointer-events: none`, and every effect is off
+under `prefers-reduced-motion` with the app still working.
+
+**Name motion classes specifically.** A bare `.ghost` for the skeleton cards
+matched every `.btn.ghost` in the app and gave each secondary button
+`position:absolute; opacity:.5` — a half-transparent sheet across the whole
+page. `scripts/lint-css.mjs` now fails the build on a bare single-class rule in
+`motion.css` whose name is also used elsewhere.
+
+## Administration
+
+There is no separate admin site and no second login. Which suite renders is
+decided by `is_admin()`, which reads a table that has **no grant for anyone** —
+`anon` and `authenticated` both get 401 on it.
+
+**The gate is in Postgres, not in the front end.** Every `admin_*` function
+re-checks `admins` and refuses a caller who is not in it, whatever screen the
+request came from. The routing in `js/seller/app.js` decides what to *draw* and
+carries no authority: the JavaScript is public, so anything it alone enforced
+would be worth nothing.
+
+Adding an admin (SQL editor — deliberately not in this repo, which is public and
+where a committed list of admin addresses would be a list of accounts worth
+attacking):
+
+    insert into admins (email, note) values ('someone@example.com', 'why');
+
+Approving a shop releases every listing queued behind it; suspending pulls them
+back out of the deck in the same motion. Promotion is admin-only — it is
+something we sell, and a seller must not be able to help themselves to it.
 
 ## Not built yet
 

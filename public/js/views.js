@@ -2,6 +2,7 @@
 import { api } from './api.js';
 import { store } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
+import { burst, pop, magnetToBag } from './motion.js';
 
 /* --------------------------------------------------------------- onboarding */
 /* Both steps are skippable, and the question is "who are you shopping for",
@@ -66,9 +67,10 @@ export function onboarding({ interests, onDone }) {
 /* --------------------------------------------------------------------- tiles */
 export function tile(p, { onOpen }) {
   const node = el(`
-    <article class="tile">
+    <article class="tile${p.promoted ? ' promoted' : ''}">
       <div class="ph">
         <img src="${esc(p.photos[0])}" alt="${esc(p.title)}" loading="lazy" decoding="async">
+        ${p.promoted ? '<span class="promo-flag">Promoted</span>' : ''}
         <button class="heart" aria-pressed="${store.wished(p.id)}" aria-label="Save ${esc(p.title)} to wishlist">
           ${store.wished(p.id) ? ICON.heartOn : ICON.heart}
         </button>
@@ -87,6 +89,7 @@ export function tile(p, { onOpen }) {
     const on = store.toggleWish(p.id);
     heart.setAttribute('aria-pressed', String(on));
     heart.innerHTML = on ? ICON.heartOn : ICON.heart;
+    if (on) { burst(node.querySelector('.ph'), 8); pop(heart); }
     toast(on ? 'Saved to your wishlist' : 'Removed from your wishlist');
   });
   return node;
@@ -235,14 +238,18 @@ export async function productScreen({ id, onBack, onBag }) {
     const on = store.toggleWish(p.id);
     wish.setAttribute('aria-pressed', String(on));
     wish.innerHTML = on ? ICON.heartOn : ICON.heart;
+    if (on) { burst(root.querySelector('.gallery'), 10); pop(wish); }
     toast(on ? 'Saved to your wishlist' : 'Removed from your wishlist');
   });
 
   root.querySelector('#add').addEventListener('click', () => {
     store.addToBag(p.id);
     api.track('add_to_bag', p.id);
-    toast('Added to your bag');
-    onBag();
+    // The thumbnail flies to the bag before we navigate, so the count changing
+    // is explained rather than just noticed. onBag() runs either way.
+    magnetToBag(root.querySelector('.frames img'), {
+      onArrive: () => { toast('Added to your bag'); onBag(); }
+    });
   });
 
   return root;

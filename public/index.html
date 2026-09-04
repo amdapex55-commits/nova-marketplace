@@ -34,6 +34,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/motion.css">
 <script src="config.js"></script>
 </head>
 <body>
@@ -43,9 +44,18 @@
      fetched underneath it; the 2-3 seconds are real work, not a delay. -->
 <div class="splash" id="splash" role="status" aria-live="polite">
   <div class="splash-in">
+    <!-- The dot that orbits here is the same mark that bursts on a save, flies
+         into the bag, draws the tick on an order and rings a photo while it
+         uploads. One idea doing every job. -->
+    <div class="orbit" aria-hidden="true">
+      <span class="ring"></span>
+      <span class="ring two"></span>
+      <span class="sat"><i></i></span>
+      <span class="sat slow"><i></i></span>
+      <span class="core"><b></b></span>
+    </div>
     <div class="mark">nova<em>.</em></div>
     <p class="tag">Swipe the best of the internet</p>
-    <div class="bar"><i></i></div>
   </div>
 </div>
 

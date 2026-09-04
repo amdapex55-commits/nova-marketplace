@@ -23,10 +23,13 @@ const SEP = '~|~';
 
 /* Every query runs as a real role — anon, authenticated, or the owner — so RLS
    and the grants are genuinely in the path rather than simulated. */
-async function sql(text, { role = null, uid = null } = {}) {
+async function sql(text, { role = null, uid = null, email = null } = {}) {
   const prelude = [
     role ? `set local role ${role};` : '',
-    uid !== null ? `set local request.jwt.uid = '${uid}';` : ''
+    uid !== null ? `set local request.jwt.uid = '${uid}';` : '',
+    // is_admin() reads the email out of auth.jwt(), so an admin is impersonated
+    // by presenting a claim set — the same thing GoTrue signs in production.
+    email !== null ? `set local request.jwt.claims = '${JSON.stringify({ email })}';` : ''
   ].join(' ');
   const wrapped = `begin; ${prelude} ${text} ; commit;`;
   const { stdout } = await run('psql', ['-qtA', '-F', SEP, '-v', 'ON_ERROR_STOP=1', '-c', wrapped, DB]);
@@ -444,4 +447,139 @@ test('a seller cannot delete another seller\'s photos', async () => {
 test('product photos are readable by anyone — it is a shopfront', async () => {
   const rows = await sql(`select count(*) from storage.objects where bucket_id = 'product-photos';`, { role: 'anon' });
   assert.ok(Number(rows[0][0]) > 0);
+});
+
+/* --------------------------------------------------------------- admin (0005) */
+
+const ADMIN = 'boss@nova.test';
+const ADMIN_UID = '99999999-8888-7777-6666-555555555555';
+
+test('an admin is nobody until they are in the table', async () => {
+  const [[before]] = await sql('select is_admin();', { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  assert.equal(before, 'f');
+  await sql(`insert into admins (email) values ('${ADMIN}');`);
+  const [[after]] = await sql('select is_admin();', { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  assert.equal(after, 't');
+});
+
+test('the admins table is unreachable through the API by anyone', async () => {
+  // No grant at all, for anon or authenticated. is_admin() reads it as definer.
+  assert.match(await fails('select * from admins;', { role: 'anon' }), /permission denied/i);
+  assert.match(await fails('select * from admins;', { role: 'authenticated', uid: userA }), /permission denied/i);
+  assert.match(await fails(`insert into admins (email) values ('me@evil.test');`,
+                           { role: 'authenticated', uid: userA }), /permission denied/i);
+});
+
+test('a signed-in seller cannot reach a single admin function', async () => {
+  // The seller UI never mentions these, but that is cosmetic — what actually
+  // stops a seller is that every one of them refuses a caller who is not in
+  // `admins`, whatever screen the request came from.
+  for (const call of [
+    'admin_overview()',
+    'admin_sellers(null)',
+    `admin_set_seller_status('${sellerB}', 'active')`,
+    `admin_set_seller_plan('${sellerB}', 'monthly', 1)`,
+    'admin_listings(null)',
+    `admin_set_product_status('${prodA1}', 'removed')`,
+    `admin_set_promoted('${prodA1}', true)`,
+    'admin_orders(10)'
+  ]) {
+    const err = await fails(`select ${call};`, { role: 'authenticated', uid: userA, email: 'seller@nova.test' });
+    assert.match(err, /not permitted/, `${call} let a seller through`);
+  }
+});
+
+test('an anonymous visitor cannot reach them either', async () => {
+  const err = await fails('select admin_overview();', { role: 'anon' });
+  assert.ok(err, 'anon must not get an overview');
+});
+
+test('a seller cannot promote their own listing', async () => {
+  // Promotion is something we sell, not something a seller helps themselves to.
+  assert.ok(await fails(`update products set promoted = true where id = '${prodA1}';`,
+                        { role: 'authenticated', uid: userA }) ||
+            (await sql(`select promoted from products where id = '${prodA1}';`))[0][0] === 'f',
+    'a seller must not be able to set promoted');
+  const [[promoted]] = await sql(`select promoted from products where id = '${prodA1}';`);
+  assert.equal(promoted, 'f');
+});
+
+test('approving a shop releases the listings queued behind it', async () => {
+  const [[sid]] = await sql(
+    `insert into sellers (brand_name, city, status) values ('Queued Shop','Multan','pending') returning id;`);
+  const [[pid]] = await sql(
+    `insert into products (seller_id, title, price, interest, city, stock, status)
+     values ('${sid}', 'Waiting Item', 1500, 'clothing', 'Multan', 2, 'pending') returning id;`);
+  await sql(`insert into photos (product_id, position, key) values ('${pid}', 0, 'q/w');`);
+  // A queued listing with no photo must NOT be released — it would reach the
+  // deck as a blank card.
+  const [[blank]] = await sql(
+    `insert into products (seller_id, title, price, interest, city, stock, status)
+     values ('${sid}', 'No Photo', 900, 'clothing', 'Multan', 1, 'pending') returning id;`);
+
+  const [[out]] = await sql(`select admin_set_seller_status('${sid}', 'active')::text;`,
+                            { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  assert.equal(JSON.parse(out).status, 'active');
+  assert.equal((await sql(`select status from products where id = '${pid}';`))[0][0], 'live');
+  assert.equal((await sql(`select status from products where id = '${blank}';`))[0][0], 'pending',
+    'a listing with no photograph must stay behind');
+});
+
+test('suspending a shop pulls its listings out of the deck in the same motion', async () => {
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Queued Shop';`);
+  await sql(`select admin_set_seller_status('${sid}', 'suspended');`,
+            { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  const live = await sql(`select count(*) from products where seller_id = '${sid}' and status = 'live';`);
+  assert.equal(live[0][0], '0', 'a shop that is off must not still be selling');
+});
+
+test('marking a payment extends from whichever date is later', async () => {
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Queued Shop';`);
+  // Trial still has time left: a payment must add to it, not replace it.
+  await sql(`update sellers set trial_ends_at = now() + interval '20 days', plan = 'trial' where id = '${sid}';`);
+  const [[out]] = await sql(`select admin_set_seller_plan('${sid}', 'monthly', 1)::text;`,
+                            { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  const paidUntil = new Date(JSON.parse(out).paid_until);
+  const days = (paidUntil - Date.now()) / 86400000;
+  assert.ok(days > 45 && days < 55, `expected roughly 50 days, got ${days.toFixed(1)} — a payment must not shorten what they had`);
+});
+
+test('an admin can take a listing down, and promote one', async () => {
+  const [[status]] = await sql(`select admin_set_product_status('${prodA1}', 'removed');`,
+                               { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  assert.equal(status, 'removed');
+  const titles = (await sql('select title from products;', { role: 'anon' })).map(r => r[0]);
+  assert.ok(!titles.includes('Ajrak Kurta'), 'a removed listing must leave the storefront');
+
+  await sql(`select admin_set_product_status('${prodA1}', 'live');`, { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  const [[promoted]] = await sql(`select admin_set_promoted('${prodA1}', true);`,
+                                 { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  assert.equal(promoted, 't');
+});
+
+test('the overview counts what it says it counts', async () => {
+  const [[out]] = await sql('select admin_overview()::text;', { role: 'authenticated', uid: ADMIN_UID, email: ADMIN });
+  const o = JSON.parse(out);
+  const [[orders]] = await sql('select count(*) from orders;');
+  const [[gmv]] = await sql('select coalesce(sum(grand_total),0) from orders;');
+  assert.equal(o.orders_total, Number(orders));
+  assert.equal(o.gmv_total, Number(gmv));
+  assert.ok(o.sellers_active >= 1);
+});
+
+test('a seller cannot publish by writing status directly, bypassing the checks', async () => {
+  // publish_product() refuses a listing with no photo, no stock, or an
+  // unapproved shop. None of that is worth anything if a seller can simply
+  // PATCH status='live' — RLS restricts which ROWS they may write, never which
+  // COLUMNS. Same class as the shipments money hole in 0004.
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Rawal Leather';`);
+  const [[uid]] = await sql(`select user_id from seller_contacts where seller_id = '${sid}';`);
+  const [[pid]] = await sql(
+    `insert into products (seller_id, title, price, interest, city, stock, status)
+     values ('${sid}', 'Sneaky Item', 100, 'clothing', 'Lahore', 0, 'draft') returning id;`);
+
+  await sql(`update products set status = 'live' where id = '${pid}';`, { role: 'authenticated', uid });
+  const [[status]] = await sql(`select status from products where id = '${pid}';`);
+  assert.equal(status, 'draft',
+    'a listing with no photo and no stock must not be able to make itself live');
 });

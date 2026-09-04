@@ -108,22 +108,13 @@ input, select, textarea { font: inherit; color: inherit; }
 .mark {
   font-family: "Familjen Grotesk", system-ui, sans-serif;
   font-weight: 700; font-size: 54px; letter-spacing: -.045em; line-height: 1;
-  opacity: 0; transform: translateY(14px);
-  animation: rise .62s cubic-bezier(.2,.7,.3,1) forwards;
 }
 .mark em { font-style: normal; color: var(--marigold); }
 .splash .tag {
   font-size: 15px; letter-spacing: .01em; color: #cfe3db; max-width: 22ch;
-  opacity: 0; transform: translateY(10px);
-  animation: rise .6s cubic-bezier(.2,.7,.3,1) .22s forwards;
 }
-.splash .bar {
-  width: 132px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.22);
-  overflow: hidden; margin-top: 10px;
-}
-.splash .bar i { display: block; height: 100%; width: 40%; background: var(--marigold); animation: load 1.5s ease-in-out infinite; }
-@keyframes rise { to { opacity: 1; transform: none; } }
-@keyframes load { 0% { transform: translateX(-120%); } 100% { transform: translateX(340%); } }
+/* The loading bar is gone: the orbit in index.html IS the progress indicator,
+   and two of them competing said the same thing twice. */
 .splash.out { animation: fade .35s ease forwards; pointer-events: none; }
 @keyframes fade { to { opacity: 0; visibility: hidden; } }
 
