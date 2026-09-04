@@ -445,6 +445,8 @@
   animation: drift 16s var(--ease-in-out) infinite alternate;
 }
 .gate-hero > * { position: relative; z-index: 1; }
+/* As a screen rather than a sheet, it has no rounded top to sit under. */
+.gate-screen .gate-hero { border-radius: 0; }
 .gate-mark {
   font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700;
   font-size: 22px; letter-spacing: -.03em; margin-bottom: 12px;

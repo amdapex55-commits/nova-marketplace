@@ -7,14 +7,19 @@
  */
 import { api } from './api.js';
 import { store } from './store.js';
-import { el, ICON } from './ui.js';
+import { el, esc, ICON } from './ui.js';
 import { onboarding, browseScreen, searchScreen, wishlistScreen, productScreen, legalScreen } from './views.js';
 import { shopScreen, offersScreen, inboxScreen, threadScreen, accountScreen } from './shop.js';
-import { account } from './account.js';
+import { account, wireGate } from './account.js';
 import { deckScreen } from './deck.js';
 import { bagScreen, checkoutScreen, orderScreen, ordersScreen } from './checkout.js';
 
 const app = document.getElementById('app');
+
+/* account.js is deliberately free of imports from the app's own modules — it is
+   the only file a second front end would need to copy — so the helpers it uses
+   are handed to it once, here. */
+wireGate({ el, esc, api, store });
 const splash = document.getElementById('splash');
 
 const go = hash => { location.hash = hash; };

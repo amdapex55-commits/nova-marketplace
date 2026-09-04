@@ -103,15 +103,30 @@ export const account = {
  * so a password is the only way back in on a second device — which is the whole
  * reason for the account. It is asked for once, and never again.
  */
-export function signUpGate({ el, esc, api, store, onDone, onCancel }) {
-  let mode = 'up';
-  const known = store.get().contact || {};
-
-  const sheet = el(`
+export function signUpGate(opts) {
+  const sheet = opts.el(`
     <div class="sheet gate" role="dialog" aria-modal="true" aria-label="Create your account">
       <div class="sheet-in"><div id="pane"></div></div>
     </div>`);
-  const pane = sheet.querySelector('#pane');
+  buildGate(sheet.querySelector('#pane'), { ...opts, close: () => sheet.remove() });
+  document.body.append(sheet);
+}
+
+/* The same thing as a screen rather than a sheet. Used at the bag, where it is
+   a step in the flow and not an interruption of one — and where a sheet over a
+   placeholder was leaving people on "one moment…" with nothing behind it. */
+export function gateScreen({ onDone, onCancel }) {
+  const root = gateEl(`
+    <div class="screen gate-screen">
+      <div class="scroll"><div id="pane"></div></div>
+    </div>`);
+  buildGate(root.querySelector('#pane'), { el: gateEl, esc: gateEsc, api: gateApi, store: gateStore, onDone, onCancel });
+  return root;
+}
+
+function buildGate(pane, { el, esc, api, store, onDone, onCancel, close }) {
+  let mode = 'up';
+  const known = store.get().contact || {};
 
   const render = () => {
     pane.replaceChildren(el(`
@@ -155,7 +170,7 @@ export function signUpGate({ el, esc, api, store, onDone, onCancel }) {
     form.append(go, err, swap, back);
 
     swap.addEventListener('click', () => { mode = mode === 'up' ? 'in' : 'up'; render(); });
-    back.addEventListener('click', () => { sheet.remove(); onCancel?.(); });
+    back.addEventListener('click', () => { close?.(); onCancel?.(); });
 
     const show = m => { err.hidden = false; err.textContent = m; };
 
@@ -186,7 +201,7 @@ export function signUpGate({ el, esc, api, store, onDone, onCancel }) {
           // rather than leaving them with no name on their orders.
           if (!me) { mode = 'up'; render(); show('Just a couple more details.'); return; }
         }
-        sheet.remove();
+        close?.();
         onDone(account.profile);
       } catch (e) {
         show(e.message);
@@ -197,5 +212,10 @@ export function signUpGate({ el, esc, api, store, onDone, onCancel }) {
   };
 
   render();
-  document.body.append(sheet);
+}
+
+/* gateScreen builds itself, so it needs the same helpers the sheet is handed. */
+let gateEl, gateEsc, gateApi, gateStore;
+export function wireGate({ el, esc, api, store }) {
+  gateEl = el; gateEsc = esc; gateApi = api; gateStore = store;
 }
