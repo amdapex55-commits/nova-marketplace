@@ -1,0 +1,15 @@
+{
+  "name": "Nova Marketplace",
+  "short_name": "Nova",
+  "description": "Swipe the best of the internet. Independent Pakistani sellers, cash on delivery, no account needed.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f2ee",
+  "theme_color": "#14614a",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

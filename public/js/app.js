@@ -10,7 +10,7 @@ import { store } from './store.js';
 import { el, ICON } from './ui.js';
 import { onboarding, browseScreen, searchScreen, wishlistScreen, productScreen } from './views.js';
 import { deckScreen } from './deck.js';
-import { bagScreen, checkoutScreen, orderScreen } from './checkout.js';
+import { bagScreen, checkoutScreen, orderScreen, ordersScreen } from './checkout.js';
 
 const app = document.getElementById('app');
 const splash = document.getElementById('splash');
@@ -83,8 +83,10 @@ async function route() {
       }), { tab: '#/bag' });
     case 'checkout':
       return paint(() => checkoutScreen({ onBack: () => go('#/bag'), onPlaced: code => go(`#/order/${code}`) }));
+    case 'orders':
+      return paint(() => ordersScreen({ onOpen: code => go(`#/order/${code}`) }), { tab: '#/bag' });
     case 'order':
-      return paint(() => orderScreen({ code: arg, onHome: () => go('#/deck') }));
+      return paint(() => orderScreen({ code: arg, onHome: () => go('#/deck'), onOrders: () => go('#/orders') }));
     default:
       return paint(() => deckScreen({ onOpen: id => go(`#/p/${id}`) }), { tab: '#/deck' });
   }

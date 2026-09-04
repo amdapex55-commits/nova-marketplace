@@ -1,0 +1,7 @@
+# The whole buyer app is one hash-routed page, so there is nothing here for a
+# crawler to index beyond the landing page. Per-product crawlable URLs are a
+# later job — see "No SEO story" in the plan.
+User-agent: *
+Allow: /
+
+Sitemap: https://amdapex55-commits.github.io/nova-marketplace/sitemap.xml

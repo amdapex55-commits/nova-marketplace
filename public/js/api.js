@@ -153,10 +153,29 @@ export const api = {
     return order;
   },
 
-  async order(code) {
-    if (live()) { const rows = await rest('orders', { code: `eq.${code}`, select: '*' }); return rows[0] || null; }
+  /* Reading an order back needs the phone as well as the code, matching
+     get_order(code, phone) in 0003_place_order.sql: a guessed or
+     shoulder-surfed code on its own must reveal nothing. Passing no phone is
+     only for this device's own confirmation screen, straight after placing. */
+  async order(code, phone = null) {
+    if (live()) {
+      const res = await fetch(new URL('/rest/v1/rpc/get_order', cfg().SUPABASE_URL), {
+        method: 'POST',
+        headers: {
+          apikey: cfg().SUPABASE_ANON_KEY,
+          authorization: `Bearer ${cfg().SUPABASE_ANON_KEY}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ p_code: code, p_phone: phone })
+      });
+      if (!res.ok) return null;
+      return (await res.json()) || null;
+    }
     const all = JSON.parse(localStorage.getItem('nova.orders.v1') || '{}');
-    return all[code] || null;
+    const found = all[String(code || '').trim().toUpperCase()] || null;
+    if (!found) return null;
+    if (phone !== null && found.contact.phone !== phone) return null;
+    return found;
   },
 
   /* Impressions and swipes are buffered and flushed in batches — one row per

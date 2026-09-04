@@ -3,11 +3,16 @@
   "private": true,
   "type": "module",
   "description": "Buyer app for Nova Marketplace. The site itself has no build step and no runtime dependencies; everything here is tooling.",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node devserver/server.mjs",
     "seed": "node scripts/seed.mjs",
     "test": "node --test scripts/money.test.mjs",
-    "deploy": "npx wrangler deploy"
+    "deploy": "npx wrangler deploy",
+    "test:db": "createdb nova_marketplace_dev 2>/dev/null; node --test scripts/db.test.mjs",
+    "icons": "python3 scripts/make-icons.py",
+    "check": "npm test && npm run test:db"
   }
 }

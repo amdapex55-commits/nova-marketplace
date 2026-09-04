@@ -31,7 +31,10 @@ export async function bagScreen({ onOpen, onCheckout }) {
   const lines = await bagLines();
   const root = el(`
     <div class="screen">
-      <div class="top"><h1>Your bag</h1></div>
+      <div class="top">
+        <h1>Your bag</h1>
+        <a class="btn ghost" href="#/orders" style="min-height:36px;padding:0 13px;font-size:14px">Orders</a>
+      </div>
       <div class="scroll" id="body"></div>
     </div>`);
   const body = root.querySelector('#body');
@@ -41,6 +44,7 @@ export async function bagScreen({ onOpen, onCheckout }) {
       <div class="empty">
         <h2>Your bag is empty</h2>
         <p>Everything you add stays here on this device. No account needed until you order.</p>
+        <a class="btn ghost" href="#/orders">Find a past order</a>
       </div>`));
     return root;
   }
@@ -354,8 +358,84 @@ export async function checkoutScreen({ onBack, onPlaced }) {
   return root;
 }
 
+/* ------------------------------------------------------- orders on this device */
+/* A buyer with no account still has to be able to find an order they placed.
+   Two routes in: the codes this device remembers, and — for a different phone
+   or a cleared browser — a lookup that needs the code AND the number it was
+   placed with, exactly as get_order() enforces server-side. */
+export async function ordersScreen({ onOpen }) {
+  const mine = store.get().orders;
+  const root = el(`
+    <div class="screen">
+      <div class="top"><h1>Your orders</h1></div>
+      <div class="scroll" id="body"></div>
+    </div>`);
+  const body = root.querySelector('#body');
+
+  if (mine.length) {
+    const list = el('<div class="group"><header><h2>Placed on this device</h2></header></div>');
+    for (const o of mine) {
+      const row = el(`
+        <button class="ship" style="width:100%;text-align:left">
+          <div class="hd"><b>${esc(o.code)}</b><span class="num">${money(o.total)}</span></div>
+          <ul><li><span>${new Date(o.placed_at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}</span><span>View</span></li></ul>
+        </button>`);
+      row.addEventListener('click', () => onOpen(o.code));
+      list.append(row);
+    }
+    body.append(list);
+  } else {
+    body.append(el(`
+      <div class="empty">
+        <h2>No orders yet</h2>
+        <p>Anything you order shows up here. If you ordered from another phone, look it up below.</p>
+      </div>`));
+  }
+
+  const look = el(`
+    <div class="group">
+      <header><h2>Find an order</h2><span class="note">code + phone</span></header>
+      <div class="inner">
+        <div class="field">
+          <label for="lk-code">Order code</label>
+          <input id="lk-code" placeholder="NM-XXXXXX" autocomplete="off" spellcheck="false" style="text-transform:uppercase">
+        </div>
+        <div class="field">
+          <label for="lk-phone">Mobile number it was placed with</label>
+          <input id="lk-phone" type="tel" inputmode="tel" placeholder="0300 1234567">
+        </div>
+        <button class="btn block" id="lk-go">Find it</button>
+        <div class="err" id="lk-err" role="alert" hidden></div>
+      </div>
+    </div>`);
+  const err = look.querySelector('#lk-err');
+  look.querySelector('#lk-go').addEventListener('click', async () => {
+    err.hidden = true;
+    const code = look.querySelector('#lk-code').value.trim().toUpperCase();
+    const phone = normalisePhone(look.querySelector('#lk-phone').value);
+    if (!code || !phone) {
+      err.hidden = false;
+      err.textContent = 'Both the code and the number are needed.';
+      return;
+    }
+    const found = await api.order(code, phone);
+    if (!found) {
+      // One message for "no such code" and "wrong number" on purpose: telling
+      // someone a code exists but the phone is wrong turns the lookup into a
+      // way to confirm that a stranger's order is real.
+      err.hidden = false;
+      err.textContent = 'No order matches that code and number.';
+      return;
+    }
+    onOpen(found.code);
+  });
+  body.append(look);
+
+  return root;
+}
+
 /* ------------------------------------------------------------- confirmation */
-export async function orderScreen({ code, onHome }) {
+export async function orderScreen({ code, onHome, onOrders }) {
   const order = await api.order(code);
   if (!order) return el('<div class="screen"><div class="empty"><h2>We cannot find that order</h2><p>Check the code, or the phone number it was placed with.</p></div></div>');
 
@@ -411,9 +491,14 @@ export async function orderScreen({ code, onHome }) {
         : 'Each seller will message you their account details. Nothing ships until your transfer clears — never send money to anyone who contacts you from a different number.'}</div>
     </div>`));
 
-  const home = el('<div class="pad" style="padding-bottom:24px"><button class="btn ghost block">Keep browsing</button></div>');
-  home.querySelector('button').addEventListener('click', onHome);
-  scroll.append(home);
+  const foot = el(`
+    <div class="pad" style="padding-bottom:24px;display:flex;flex-direction:column;gap:10px">
+      <button class="btn block" id="keep-going">Keep browsing</button>
+      <button class="btn ghost block" id="all-orders">All your orders</button>
+    </div>`);
+  foot.querySelector('#keep-going').addEventListener('click', onHome);
+  foot.querySelector('#all-orders').addEventListener('click', onOrders);
+  scroll.append(foot);
 
   return root;
 }
