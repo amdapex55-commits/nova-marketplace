@@ -758,3 +758,231 @@ test('a seller sees insights for their own listings only', async () => {
   assert.ok(!JSON.parse(otherOut).products.some(p => mine.has(p.id)),
     'two sellers must never see the same listing in their insights');
 });
+
+/* ------------------------------------- variants, offers, messaging, reviews -- */
+
+let vProduct, vSmall, vLarge, vSellerId, vSellerUid;
+
+test('a listing with sizes cannot be ordered without picking one', async () => {
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Deck Shop';`);
+  const [[uid]] = await sql(`select user_id from seller_contacts where seller_id = '${sid}';`);
+  vSellerId = sid; vSellerUid = uid;
+  const [[pid]] = await sql(
+    `insert into products (seller_id, title, price, interest, city, stock, status)
+     values ('${sid}', 'Sized Kurta', 3000, 'clothing', 'Karachi', 0, 'live') returning id;`);
+  await sql(`insert into photos (product_id, position, key) values ('${pid}', 0, 'k/sized');`);
+  const rows = await sql(`
+    insert into variants (product_id, size, colour, colour_hex, stock, position) values
+      ('${pid}', 'S', 'Indigo', '#2c3e6c', 2, 0),
+      ('${pid}', 'L', 'Indigo', '#2c3e6c', 3, 1)
+    returning id;`);
+  vProduct = pid; [[vSmall], [vLarge]] = rows;
+
+  // Stock is the variants' total now, not the product column, which is 0.
+  assert.equal((await sql(`select available_stock('${pid}');`))[0][0], '5');
+
+  const noSize = await fails(
+    `select place_order('${order([{ product_id: pid, qty: 1 }])}'::jsonb);`, { role: 'anon' });
+  assert.match(noSize, /pick a size/);
+});
+
+test('ordering a size takes stock from that size only', async () => {
+  const payload = order([{ product_id: vProduct, variant_id: vSmall, qty: 2 }]);
+  const [[out]] = await sql(`select place_order('${payload}'::jsonb)::text;`, { role: 'anon' });
+  const o = JSON.parse(out);
+  assert.equal(o.shipments[0].lines[0].variant, 'S / Indigo',
+    'the order must say which one, in words the buyer can read later');
+
+  const stocks = await sql(`select size, stock from variants where product_id = '${vProduct}' order by size;`);
+  assert.deepEqual(stocks, [['L', '3'], ['S', '0']]);
+
+  const gone = await fails(
+    `select place_order('${order([{ product_id: vProduct, variant_id: vSmall, qty: 1 }])}'::jsonb);`,
+    { role: 'anon' });
+  assert.match(gone, /not enough stock/);
+});
+
+test('a listing sells out only when every size has', async () => {
+  assert.equal((await sql(`select status from products where id = '${vProduct}';`))[0][0], 'live',
+    'one size out of stock is not sold out');
+  await sql(`select place_order('${order([{ product_id: vProduct, variant_id: vLarge, qty: 3 }])}'::jsonb);`,
+            { role: 'anon' });
+  assert.equal((await sql(`select status from products where id = '${vProduct}';`))[0][0], 'sold');
+  await sql(`update variants set stock = 5 where product_id = '${vProduct}';
+             update products set status = 'live' where id = '${vProduct}';`);
+});
+
+test('a sale price is what gets charged, and it expires on its own', async () => {
+  const [[pid]] = await sql(`select id from products where title = 'Chikankari Kurta';`);
+  await sql(`update products set price = 4000, sale_price = 2500,
+             sale_ends_at = now() + interval '1 day' where id = '${pid}';`);
+  let [[json]] = await sql(`select product_json('${pid}')::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(json).price, 2500, 'the card shows the sale price');
+  assert.equal(JSON.parse(json).was, 4000, 'and what it was, for the strikethrough');
+
+  const [[out]] = await sql(`select place_order('${order([{ product_id: pid, qty: 1 }])}'::jsonb)::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(out).totals.items, 2500, 'and the server charges the sale price');
+
+  const [[feed]] = await sql(`select offers(20)::text;`, { role: 'anon' });
+  assert.ok(JSON.parse(feed).items.some(p => p.id === pid), 'it belongs in the offers feed');
+
+  // An expired sale is simply not a sale.
+  await sql(`update products set sale_ends_at = now() - interval '1 hour' where id = '${pid}';`);
+  [[json]] = await sql(`select product_json('${pid}')::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(json).price, 4000);
+  assert.equal(JSON.parse(json).was, null);
+  const [[feed2]] = await sql(`select offers(20)::text;`, { role: 'anon' });
+  assert.ok(!JSON.parse(feed2).items.some(p => p.id === pid), 'and it leaves the offers feed');
+});
+
+test('browse filters by price, city and size, and reports honest facets', async () => {
+  const b = async (args) => JSON.parse((await sql(`select browse(${args})::text;`, { role: 'anon' }))[0][0]);
+  const cheap = await b(`null, 60, 0, null, 2000`);
+  assert.ok(cheap.items.every(p => p.price <= 2000), 'max price must hold');
+  const karachi = await b(`null, 60, 0, null, null, 'karachi'`);
+  assert.ok(karachi.items.every(p => p.city.toLowerCase() === 'karachi'), 'city is case-insensitive');
+  const sized = await b(`null, 60, 0, null, null, null, null, 'L'`);
+  assert.ok(sized.items.every(p => p.sizes.includes('L')), 'size filter must only return that size');
+
+  const all = await b(`null, 60, 0`);
+  assert.ok(all.facets.sizes.includes('L'), 'facets must offer a size that exists');
+  assert.ok(all.facets.max_price > 0);
+});
+
+test('a buyer and a seller can hold one conversation', async () => {
+  const [[out]] = await sql(
+    `select buyer_open_thread('dev-1', '${vSellerId}', '${vProduct}', 'Sana', 'Do you have this in medium?')::text;`,
+    { role: 'anon' });
+  const t = JSON.parse(out);
+  assert.equal(t.messages.length, 1);
+  assert.equal(t.messages[0].sender, 'buyer');
+
+  const [[sellerSide]] = await sql(`select seller_threads()::text;`, { role: 'authenticated', uid: vSellerUid });
+  const threads = JSON.parse(sellerSide);
+  assert.equal(threads.length, 1);
+  assert.equal(threads[0].unread, 1, 'the seller should see it as unread');
+
+  await sql(`select seller_send('${t.id}', 'Medium arrives on Thursday.');`, { role: 'authenticated', uid: vSellerUid });
+  const [[back]] = await sql(`select buyer_thread('dev-1', '${t.id}')::text;`, { role: 'anon' });
+  const conv = JSON.parse(back);
+  assert.equal(conv.messages.length, 2);
+  assert.equal(conv.unread, 1, 'and the buyer should now have one');
+
+  // Asking a second question does not start a second inbox.
+  await sql(`select buyer_open_thread('dev-1', '${vSellerId}', null, null, 'And in blue?');`, { role: 'anon' });
+  const [[again]] = await sql(`select seller_threads()::text;`, { role: 'authenticated', uid: vSellerUid });
+  assert.equal(JSON.parse(again).length, 1, 'one thread per buyer per shop');
+});
+
+test('a conversation belongs to the device that opened it', async () => {
+  const [[tid]] = await sql(`select id from threads where device_id = 'dev-1';`);
+  const [[stolen]] = await sql(`select coalesce(buyer_thread('dev-2', '${tid}')::text, 'null');`, { role: 'anon' });
+  assert.equal(stolen, 'null', 'another device must not be able to read it');
+  assert.match(await fails(`select buyer_send('dev-2', '${tid}', 'hello');`, { role: 'anon' }),
+    /not your conversation/);
+  assert.match(await fails(`select seller_send('${tid}', 'hi');`, { role: 'authenticated', uid: userA }),
+    /not your conversation/);
+  assert.match(await fails(`select * from messages;`, { role: 'anon' }), /permission denied/i);
+});
+
+test('an order can be cancelled inside 24 hours, and not after', async () => {
+  const [[out]] = await sql(
+    `select place_order('${order([{ product_id: vProduct, variant_id: vSmall, qty: 1 }])}'::jsonb)::text;`,
+    { role: 'anon' });
+  const code = JSON.parse(out).code;
+  const [[before]] = await sql(`select variants.stock from variants where id = '${vSmall}';`);
+
+  let [[win]] = await sql(`select cancel_window('${code}', '03001234567')::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(win).can_cancel, true);
+  assert.ok(JSON.parse(win).seconds_left > 86000);
+
+  const [[cancelled]] = await sql(`select cancel_order('${code}', '03001234567')::text;`, { role: 'anon' });
+  assert.ok(JSON.parse(cancelled).cancelled_at, 'the order should be marked cancelled');
+  assert.equal((await sql(`select status from shipments sh join orders o on o.id = sh.order_id where o.code = '${code}';`))[0][0], 'cancelled');
+
+  // The stock has to come back, or a cancelled order leaves a listing sold out.
+  const [[after]] = await sql(`select variants.stock from variants where id = '${vSmall}';`);
+  assert.equal(Number(after), Number(before) + 1);
+
+  assert.match(await fails(`select cancel_order('${code}', '03001234567');`, { role: 'anon' }),
+    /already cancelled/);
+});
+
+test('the 24 hour window really does close', async () => {
+  const [[out]] = await sql(
+    `select place_order('${order([{ product_id: vProduct, variant_id: vLarge, qty: 1 }])}'::jsonb)::text;`,
+    { role: 'anon' });
+  const code = JSON.parse(out).code;
+  await sql(`update orders set placed_at = now() - interval '25 hours' where code = '${code}';`);
+
+  const [[win]] = await sql(`select cancel_window('${code}', '03001234567')::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(win).can_cancel, false);
+  assert.equal(JSON.parse(win).seconds_left, 0);
+  assert.match(await fails(`select cancel_order('${code}', '03001234567');`, { role: 'anon' }),
+    /24 hour window/);
+});
+
+test('a dispatched parcel cannot be cancelled even inside the window', async () => {
+  const [[out]] = await sql(
+    `select place_order('${order([{ product_id: vProduct, variant_id: vLarge, qty: 1 }])}'::jsonb)::text;`,
+    { role: 'anon' });
+  const code = JSON.parse(out).code;
+  const [[sh]] = await sql(`select sh.id from shipments sh join orders o on o.id = sh.order_id where o.code = '${code}';`);
+  await sql(`select set_shipment_status('${sh}', 'dispatched', 'Leopards', 'LEO-123456');`,
+            { role: 'authenticated', uid: vSellerUid });
+
+  const err = await fails(`select cancel_order('${code}', '03001234567');`, { role: 'anon' });
+  assert.match(err, /already on its way/, 'and the buyer should be told why, not just lose the button');
+
+  // Tracking rides along on the order the buyer reads.
+  const [[order_]] = await sql(`select get_order('${code}', '03001234567')::text;`, { role: 'anon' });
+  const shipment = JSON.parse(order_).shipments[0];
+  assert.equal(shipment.courier, 'Leopards');
+  assert.equal(shipment.tracking_number, 'LEO-123456');
+  assert.ok(shipment.dispatched_at, 'and when it went');
+  assert.ok(shipment.eta.min > 0 && shipment.eta.max >= shipment.eta.min, 'with an estimate');
+});
+
+test('a review needs a delivered parcel, and then counts', async () => {
+  const [[out]] = await sql(
+    `select place_order('${order([{ product_id: vProduct, variant_id: vLarge, qty: 1 }])}'::jsonb)::text;`,
+    { role: 'anon' });
+  const code = JSON.parse(out).code;
+
+  assert.match(await fails(`select leave_review('${code}', '03001234567', '${vProduct}', 5, 'lovely');`, { role: 'anon' }),
+    /once it has been delivered/);
+
+  const [[sh]] = await sql(`select sh.id from shipments sh join orders o on o.id = sh.order_id where o.code = '${code}';`);
+  await sql(`select set_shipment_status('${sh}', 'confirmed');`, { role: 'authenticated', uid: vSellerUid });
+  await sql(`select set_shipment_status('${sh}', 'dispatched');`, { role: 'authenticated', uid: vSellerUid });
+  await sql(`select set_shipment_status('${sh}', 'delivered');`, { role: 'authenticated', uid: vSellerUid });
+
+  await sql(`select leave_review('${code}', '03001234567', '${vProduct}', 5, 'Beautiful work.');`, { role: 'anon' });
+  const [[json]] = await sql(`select product_json('${vProduct}')::text;`, { role: 'anon' });
+  const p = JSON.parse(json);
+  assert.equal(Number(p.rating), 5);
+  assert.equal(p.reviews, 1);
+  assert.equal(Number(p.seller.rating), 5, 'and it counts towards the shop');
+
+  const [[rev]] = await sql(`select product_reviews('${vProduct}', 10)::text;`, { role: 'anon' });
+  assert.equal(JSON.parse(rev)[0].body, 'Beautiful work.');
+
+  // Editing a review replaces it rather than adding a second.
+  await sql(`select leave_review('${code}', '03001234567', '${vProduct}', 4, 'Changed my mind.');`, { role: 'anon' });
+  assert.equal((await sql(`select count(*) from reviews where order_code = '${code}';`))[0][0], '1');
+});
+
+test('a shop page shows only that shop, and only live listings', async () => {
+  const [[out]] = await sql(`select shop('${vSellerId}', 50)::text;`, { role: 'anon' });
+  const s = JSON.parse(out);
+  assert.equal(s.id, vSellerId);
+  assert.ok(s.products.length > 0);
+  assert.ok(s.products.every(p => p.seller_id === vSellerId), 'somebody else\'s listing must not appear');
+  assert.ok(s.products.every(p => p.status === 'live'));
+  assert.ok(s.delivered >= 1, 'the count we show instead of an invented rating');
+
+  await sql(`update sellers set status = 'suspended' where id = '${vSellerId}';`);
+  const [[gone]] = await sql(`select coalesce(shop('${vSellerId}', 50)::text, 'null');`, { role: 'anon' });
+  assert.equal(gone, 'null', 'a suspended shop has no page');
+  await sql(`update sellers set status = 'active' where id = '${vSellerId}';`);
+});

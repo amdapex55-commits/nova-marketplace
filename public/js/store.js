@@ -13,6 +13,12 @@
  */
 
 const KEY = 'nova.v1';
+
+/* One bag line is one product-and-variant pair — Medium and Large are two
+   lines, not one with a quantity of two, because they are two different things
+   to pack. Everything that removes or re-counts a line addresses it by this,
+   never by product id alone. */
+export const bagKey = l => `${l.id}::${l.variant_id ?? ''}`;
 const SEEN_CAP = 3000;
 
 /* A random id for this browser. Not a person and not tracked across sites — it
@@ -91,19 +97,20 @@ export const store = {
   },
   wished: id => state.wishlist.includes(id),
 
-  /* --- bag --- */
-  addToBag(id, qty = 1) {
-    const line = state.bag.find(l => l.id === id);
+  /* --- bag: keyed on product AND variant, see bagKey above --- */
+  addToBag(id, qty = 1, variant = null) {
+    const v = variant?.variant_id ?? null;
+    const line = state.bag.find(l => l.id === id && (l.variant_id ?? null) === v);
     if (line) line.qty = Math.min(10, line.qty + qty);
-    else state.bag.push({ id, qty });
+    else state.bag.push({ id, qty, variant_id: v, label: variant?.label ?? null });
     commit();
   },
-  setQty(id, qty) {
-    if (qty <= 0) state.bag = state.bag.filter(l => l.id !== id);
-    else { const l = state.bag.find(x => x.id === id); if (l) l.qty = Math.min(10, qty); }
+  setQty(key, qty) {
+    if (qty <= 0) state.bag = state.bag.filter(l => bagKey(l) !== key);
+    else { const l = state.bag.find(x => bagKey(x) === key); if (l) l.qty = Math.min(10, qty); }
     commit();
   },
-  removeFromBag(id) { state.bag = state.bag.filter(l => l.id !== id); commit(); },
+  removeFromBag(key) { state.bag = state.bag.filter(l => bagKey(l) !== key); commit(); },
   clearBag() { state.bag = []; commit(); },
   bagCount: () => state.bag.reduce((n, l) => n + l.qty, 0),
   inBag: id => state.bag.some(l => l.id === id),

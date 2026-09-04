@@ -9,6 +9,7 @@ import { api } from './api.js';
 import { store } from './store.js';
 import { el, ICON } from './ui.js';
 import { onboarding, browseScreen, searchScreen, wishlistScreen, productScreen, legalScreen } from './views.js';
+import { shopScreen, offersScreen, inboxScreen, threadScreen } from './shop.js';
 import { deckScreen } from './deck.js';
 import { bagScreen, checkoutScreen, orderScreen, ordersScreen } from './checkout.js';
 
@@ -17,12 +18,15 @@ const splash = document.getElementById('splash');
 
 const go = hash => { location.hash = hash; };
 
+/* Five tabs, not six. Offers earns one because a sale is a reason to come back;
+   Search gives up its tab because it is a thing you reach for with intent, and
+   it now sits at the top of Browse where it belongs. */
 const TABS = [
-  { hash: '#/deck',     label: 'For you',  icon: ICON.cards },
-  { hash: '#/browse',   label: 'Browse',   icon: ICON.grid },
-  { hash: '#/search',   label: 'Search',   icon: ICON.search },
-  { hash: '#/wishlist', label: 'Saved',    icon: ICON.heart },
-  { hash: '#/bag',      label: 'Bag',      icon: ICON.bag }
+  { hash: '#/deck',     label: 'For you', icon: ICON.cards },
+  { hash: '#/browse',   label: 'Browse',  icon: ICON.grid },
+  { hash: '#/offers',   label: 'Offers',  icon: ICON.tag },
+  { hash: '#/wishlist', label: 'Saved',   icon: ICON.heart },
+  { hash: '#/bag',      label: 'Bag',     icon: ICON.bag }
 ];
 
 function tabBar(current) {
@@ -69,13 +73,45 @@ async function route() {
       return paint(() => onboarding({ interests, onDone: () => go('#/deck') }));
     }
     case 'browse':
-      return paint(() => browseScreen({ onOpen: id => go(`#/p/${id}`) }), { tab: '#/browse' });
+      return paint(() => browseScreen({ onOpen: id => go(`#/p/${id}`), onSearch: () => go('#/search') }), { tab: '#/browse' });
     case 'search':
-      return paint(() => searchScreen({ onOpen: id => go(`#/p/${id}`) }), { tab: '#/search' });
+      return paint(() => searchScreen({ onOpen: id => go(`#/p/${id}`) }), { tab: '#/browse' });
+    case 'offers':
+      return paint(() => offersScreen({ onOpen: id => go(`#/p/${id}`) }), { tab: '#/offers' });
+    case 'shop':
+      return paint(() => shopScreen({
+        id: arg,
+        onOpen: id => go(`#/p/${id}`),
+        onBack: () => history.back(),
+        onMessage: (sellerId, productId) => go(`#/ask/${sellerId}${productId ? '/' + productId : ''}`)
+      }));
+    case 'inbox':
+      return paint(() => inboxScreen({ onOpen: id => go(`#/thread/${id}`) }), { tab: '#/bag' });
+    case 'thread':
+      return paint(() => threadScreen({ id: arg, onBack: () => go('#/inbox') }));
+    case 'ask': {
+      // Opening (or re-opening) the one thread this device has with that shop,
+      // then going straight to it — the buyer never sees a "creating…" step.
+      const [, , sellerId, productId] = location.hash.split('/');
+      return paint(async () => {
+        const t = await api.msg.open({
+          sellerId, productId: productId || null,
+          name: store.get().contact?.name || null
+        });
+        location.replace(`#/thread/${t.id}`);
+        return el('<div class="screen"><div class="empty"><p>Opening…</p></div></div>');
+      });
+    }
     case 'wishlist':
       return paint(() => wishlistScreen({ onOpen: id => go(`#/p/${id}`) }), { tab: '#/wishlist' });
     case 'p':
-      return paint(() => productScreen({ id: arg, onBack: () => history.back(), onBag: () => go('#/bag') }));
+      return paint(() => productScreen({
+        id: arg,
+        onBack: () => history.back(),
+        onBag: () => go('#/bag'),
+        onShop: sellerId => go(`#/shop/${sellerId}`),
+        onMessage: (sellerId, productId) => go(`#/ask/${sellerId}/${productId}`)
+      }));
     case 'bag':
       return paint(() => bagScreen({
         onOpen: id => go(`#/p/${id}`),

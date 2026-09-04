@@ -129,10 +129,16 @@ export const api = {
     };
   },
 
-  async browse({ interest = null, limit = 60, offset = 0 } = {}) {
+  async browse({ interest = null, limit = 60, offset = 0, filters = {} } = {}) {
     if (live()) {
-      const out = await rpc('browse', { p_interest: interest, p_limit: limit, p_offset: offset });
-      return { items: out.items.map(fromLive), total: out.total };
+      const out = await rpc('browse', {
+        p_interest: interest, p_limit: limit, p_offset: offset,
+        p_min_price: filters.min ?? null, p_max_price: filters.max ?? null,
+        p_city: filters.city ?? null, p_condition: filters.condition ?? null,
+        p_size: filters.size ?? null, p_on_sale: !!filters.onSale,
+        p_sort: filters.sort ?? 'new'
+      });
+      return { items: out.items.map(fromLive), total: out.total, facets: out.facets };
     }
     const c = await catalog();
     const items = c.products
@@ -179,6 +185,72 @@ export const api = {
     if (live()) return (await rpc('products_by_id', { p_ids: ids })).map(fromLive);
     const c = await catalog();
     return ids.map(id => c.byId.get(id)).filter(Boolean).map(p => hydrate(c, p));
+  },
+
+  async offers() {
+    if (live()) return (await rpc('offers', { p_limit: 60 })).items.map(fromLive);
+    // Fixtures have no sale prices; the tab is honest about being empty.
+    return [];
+  },
+
+  async shop(id) {
+    if (!live()) return null;
+    const s = await rpc('shop', { p_seller: id, p_limit: 60 });
+    return s && { ...s, products: s.products.map(fromLive) };
+  },
+
+  async reviews(productId) {
+    if (!live()) return [];
+    return rpc('product_reviews', { p_product: productId, p_limit: 20 });
+  },
+
+  async reviewable(code, phone) {
+    if (!live()) return [];
+    return rpc('reviewable', { p_code: code, p_phone: phone });
+  },
+
+  async leaveReview(code, phone, productId, rating, body) {
+    if (!live()) return { ok: true };
+    return rpc('leave_review', { p_code: code, p_phone: phone, p_product: productId, p_rating: rating, p_body: body });
+  },
+
+  async cancelWindow(code, phone) {
+    if (!live()) return { can_cancel: false, seconds_left: 0 };
+    return rpc('cancel_window', { p_code: code, p_phone: phone });
+  },
+
+  async cancelOrder(code, phone) {
+    if (!live()) throw new Error('Cancelling needs the live backend.');
+    return rpc('cancel_order', { p_code: code, p_phone: phone });
+  },
+
+  /* Messaging. The device id is the buyer's whole identity here — see
+     20260904160002_messaging.sql for why, and what replaces it if buyer
+     accounts ever arrive. */
+  msg: {
+    async threads() {
+      if (!live()) return [];
+      return rpc('buyer_threads', { p_device: store.deviceId() });
+    },
+    async thread(id) {
+      if (!live()) return null;
+      return rpc('buyer_thread', { p_device: store.deviceId(), p_thread: id });
+    },
+    async open({ sellerId, productId = null, name = null, body = null }) {
+      if (!live()) throw new Error('Messages need the live backend.');
+      return rpc('buyer_open_thread', {
+        p_device: store.deviceId(), p_seller: sellerId,
+        p_product: productId, p_name: name, p_body: body
+      });
+    },
+    async send(threadId, body) {
+      if (!live()) throw new Error('Messages need the live backend.');
+      return rpc('buyer_send', { p_device: store.deviceId(), p_thread: threadId, p_body: body });
+    },
+    async read(threadId) {
+      if (!live()) return;
+      return rpc('buyer_read', { p_device: store.deviceId(), p_thread: threadId });
+    }
   },
 
   async sellers() {

@@ -12,18 +12,32 @@
  * below is grouped by seller rather than showing one flat total.
  */
 import { api } from './api.js';
-import { store } from './store.js';
+import { store, bagKey } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
 import { priceOrder, normalisePhone, prettyPhone, orderCode, RULES } from './money.mjs';
 import { statusRail } from './motion.js';
+import { reviewSheet } from './shop.js';
 
 const lineFrom = p => ({ id: p.id, seller_id: p.seller_id, title: p.title, price: p.price, photo: p.photos[0], city: p.city, brand: p.seller.brand_name });
 
 async function bagLines() {
   const bag = store.get().bag;
-  const products = await api.products(bag.map(l => l.id));
+  const products = await api.products([...new Set(bag.map(l => l.id))]);
   return bag
-    .map(l => { const p = products.find(x => x.id === l.id); return p ? { ...lineFrom(p), qty: l.qty, stock: p.stock } : null; })
+    .map(l => {
+      const p = products.find(x => x.id === l.id);
+      if (!p) return null;
+      // A variant that has gone since it was bagged: keep the line but show the
+      // real stock, so the buyer is told rather than refused at the till.
+      const v = l.variant_id ? (p.variants || []).find(x => x.id === l.variant_id) : null;
+      return {
+        ...lineFrom(p), qty: l.qty, key: bagKey(l),
+        variant_id: l.variant_id ?? null,
+        label: v ? [v.size, v.colour].filter(Boolean).join(' / ') : l.label,
+        stock: v ? v.stock : p.stock,
+        gone: !!(l.variant_id && !v)
+      };
+    })
     .filter(Boolean);
 }
 
@@ -67,7 +81,11 @@ export async function bagScreen({ onOpen, onCheckout }) {
           <div class="ph"><img src="${esc(l.photo)}" alt="" loading="lazy"></div>
           <div>
             <h3>${esc(l.title)}</h3>
-            <div class="sub num">${money(l.price)} each${l.stock <= 3 ? ` · only ${l.stock} left` : ''}</div>
+            ${l.label ? `<div class="sub"><b>${esc(l.label)}</b></div>` : ''}
+            <div class="sub num">${money(l.price)} each${
+              l.gone ? ' · <b style="color:var(--danger)">no longer available</b>'
+              : l.stock === 0 ? ' · <b style="color:var(--danger)">sold out</b>'
+              : l.stock <= 3 ? ` · only ${l.stock} left` : ''}</div>
             <div class="stepper">
               <button aria-label="Fewer" ${l.qty <= 1 ? 'disabled' : ''}>&minus;</button>
               <span class="num">${l.qty}</span>
@@ -78,9 +96,9 @@ export async function bagScreen({ onOpen, onCheckout }) {
           <div class="price num">${money(l.price * l.qty)}</div>
         </div>`);
       const [minus, plus] = row.querySelectorAll('.stepper button');
-      minus.addEventListener('click', () => { store.setQty(l.id, l.qty - 1); onCheckout.refresh(); });
-      plus.addEventListener('click', () => { store.setQty(l.id, l.qty + 1); onCheckout.refresh(); });
-      row.querySelector('.rm').addEventListener('click', () => { store.removeFromBag(l.id); toast('Removed'); onCheckout.refresh(); });
+      minus.addEventListener('click', () => { store.setQty(l.key, l.qty - 1); onCheckout.refresh(); });
+      plus.addEventListener('click', () => { store.setQty(l.key, l.qty + 1); onCheckout.refresh(); });
+      row.querySelector('.rm').addEventListener('click', () => { store.removeFromBag(l.key); toast('Removed'); onCheckout.refresh(); });
       row.querySelector('.ph').addEventListener('click', () => onOpen(l.id));
       group.append(row);
     }
@@ -253,7 +271,7 @@ export async function checkoutScreen({ onBack, onPlaced }) {
         <div class="ship">
           <div class="hd"><b>${esc(sh.seller.brand_name)}</b><span>${esc(sh.seller.city)}${form.city ? (sh.sameCity ? ' · same city' : ' · other city') : ''}</span></div>
           <ul>
-            ${sh.lines.map(l => `<li><span>${esc(l.title)} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></li>`).join('')}
+            ${sh.lines.map(l => `<li><span>${esc(l.title)}${l.label ? ` · ${esc(l.label)}` : ''} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></li>`).join('')}
             <li><span>${sh.freeDelivery && !form.express ? 'Delivery (free over ' + money(RULES.FREE_DELIVERY_OVER) + ')' : 'Delivery'}</span><span class="num">${form.city ? money(sh.delivery) : '—'}</span></li>
           </ul>
         </div>`));
@@ -314,7 +332,7 @@ export async function checkoutScreen({ onBack, onPlaced }) {
       code: orderCode(),
       placed_at: new Date().toISOString(),
       // What the server actually acts on: ids and quantities, never prices.
-      lines: lines.map(l => ({ product_id: l.id, qty: l.qty })),
+      lines: lines.map(l => ({ product_id: l.id, variant_id: l.variant_id, qty: l.qty })),
       // The prices are snapshotted here so the confirmation can never disagree
       // with what was agreed. The live version re-reads them server-side before
       // writing: a price that arrived from a browser is a price an attacker
@@ -499,13 +517,16 @@ export async function orderScreen({ code, onHome, onOrders }) {
       <div class="ship">
         <div class="hd"><b>${esc(sh.seller)}</b><span class="num">${money(sh.total)}</span></div>
         <ul>
-          ${sh.lines.map(l => `<li><span>${esc(l.title)} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></li>`).join('')}
+          ${sh.lines.map(l => `<li><span>${esc(l.title)}${l.variant ? ` · ${esc(l.variant)}` : ''} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></li>`).join('')}
           <li><span>Delivery from ${esc(sh.from)}</span><span class="num">${sh.delivery === 0 ? 'Free' : money(sh.delivery)}</span></li>
         </ul>
       </div>`);
     // The same rail the seller sees in their inbox, so the two can never
     // disagree about where a parcel has got to.
     row.append(statusRail(sh.status || 'placed'));
+    if (sh.eta && sh.status !== 'delivered') {
+      row.append(el(`<div style="font-size:13px;color:var(--ink-faint);padding-top:2px">Expected in ${sh.eta.min}–${sh.eta.max} days</div>`));
+    }
     ship.append(row);
   }
   ship.append(el(`
@@ -525,6 +546,109 @@ export async function orderScreen({ code, onHome, onOrders }) {
         ${order.contact.notes ? `<div style="color:var(--ink-faint);font-size:13px">Note: ${esc(order.contact.notes)}</div>` : ''}
       </div>
     </div>`));
+
+  /* The 24 hour cancel window, drawn as a ring that empties.
+     A bare countdown reads as a threat; a ring still three-quarters full reads
+     as "there is time". When it runs out the whole block folds away rather than
+     leaving a dead button — and the reason is stated, because a button that
+     silently vanishes looks like a bug. */
+  const win = order.cancel || {};
+  if (!order.cancelled_at && (win.can_cancel || win.seconds_left > 0)) {
+    const card = el(`
+      <div class="group"><div class="inner">
+        <div class="timer">
+          <svg viewBox="0 0 40 40" aria-hidden="true">
+            <circle class="track" cx="20" cy="20" r="18"></circle>
+            <circle class="left" cx="20" cy="20" r="18"></circle>
+          </svg>
+          <div class="read"><span id="clock"></span><small id="why">to change your mind</small></div>
+        </div>
+        <button class="btn ghost block" id="cancel" ${win.can_cancel ? '' : 'disabled'}>Cancel this order</button>
+      </div></div>`);
+    const ring = card.querySelector('.left');
+    const clock = card.querySelector('#clock');
+    const why = card.querySelector('#why');
+    const timer = card.querySelector('.timer');
+    const btn = card.querySelector('#cancel');
+
+    let left = win.seconds_left;
+    const TOTAL = 24 * 3600;
+    const paint = () => {
+      const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), sec = left % 60;
+      clock.textContent = h > 0 ? `${h}h ${m}m left` : `${m}m ${String(sec).padStart(2, '0')}s left`;
+      ring.style.strokeDashoffset = String(113 - 113 * Math.max(0, left / TOTAL));
+      timer.classList.toggle('low', left < 3600 * 3);
+      timer.classList.toggle('out', left <= 0);
+      if (win.dispatched) {
+        why.textContent = 'already on its way — refuse it at the door instead';
+        btn.disabled = true;
+      }
+      if (left <= 0) {
+        card.classList.add('cancel-gone');
+        setTimeout(() => card.remove(), 500);
+        clearInterval(tick);
+      }
+    };
+    const tick = setInterval(() => { left -= 1; paint(); }, 1000);
+    root.addEventListener('screen:leave', () => clearInterval(tick));
+    paint();
+
+    btn.addEventListener('click', async () => {
+      if (!confirm('Cancel this order? The seller will be told and your items go back on sale.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Cancelling…';
+      try {
+        await api.cancelOrder(order.code, order.contact.phone);
+        toast('Order cancelled');
+        onOrders();
+      } catch (err) {
+        toast(err.message || 'Could not cancel');
+        btn.disabled = false;
+        btn.textContent = 'Cancel this order';
+      }
+    });
+    scroll.append(card);
+  }
+
+  if (order.cancelled_at) {
+    scroll.append(el('<div class="notice bad"><div><b>This order was cancelled.</b> Nothing will arrive and you owe nothing.</div></div>'));
+  }
+
+  /* Tracking, once there is something to track. */
+  for (const sh of order.shipments.filter(s => s.tracking_number)) {
+    const steps = ['placed', 'confirmed', 'dispatched', 'delivered'];
+    const at = Math.max(0, steps.indexOf(sh.status));
+    scroll.append(el(`
+      <div class="track-card">
+        <div style="font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);font-weight:600">
+          ${esc(sh.seller)} · ${esc(sh.courier || 'courier')}</div>
+        <div class="track-num" style="margin-top:9px">
+          <span>${esc(sh.tracking_number)}</span>
+          <button data-copy="${esc(sh.tracking_number)}">Copy</button>
+        </div>
+        <div class="van"><b style="width:${(at / 3) * 100}%"></b>
+          <i style="left:${(at / 3) * 100}%">${ICON.truck}</i></div>
+        <div style="font-size:13px;color:var(--ink-soft)">
+          ${sh.status === 'delivered' ? 'Delivered'
+            : `Expected in ${sh.eta.min}–${sh.eta.max} days`}</div>
+      </div>`));
+  }
+  scroll.querySelectorAll('[data-copy]').forEach(b =>
+    b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copy); toast('Tracking number copied'); }
+      catch { toast('Could not copy — select it by hand'); }
+    }));
+
+  /* Reviews, once a parcel has actually arrived. */
+  if (order.shipments.some(s => s.status === 'delivered')) {
+    const ask = el('<div class="pad" style="padding-bottom:4px"><button class="btn block">Review what arrived</button></div>');
+    ask.querySelector('button').addEventListener('click', async () => {
+      const items = await api.reviewable(order.code, order.contact.phone);
+      if (!items.length) { toast('Nothing to review yet'); return; }
+      reviewSheet({ code: order.code, phone: order.contact.phone, items, onDone: onOrders });
+    });
+    scroll.append(ask);
+  }
 
   scroll.append(el(`
     <div class="notice ${order.payment === 'cod' ? 'info' : 'warn'}">

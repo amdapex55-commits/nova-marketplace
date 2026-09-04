@@ -414,3 +414,22 @@ input, select, textarea { font: inherit; color: inherit; }
   margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--rule-soft);
   font-size: 12.5px; color: var(--ink-faint);
 }
+
+/* Sizes on a card. Small, quiet, and the single thing a clothing buyer looks
+   for before anything else — "is my size even here". */
+.card-sizes { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+.card-sizes span {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .03em;
+  padding: 1px 6px; border-radius: 4px; background: var(--sunken); color: var(--ink-faint);
+}
+.swipe-card .card-sizes span { font-size: 11px; padding: 2px 7px; }
+
+.pickhead {
+  display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px;
+  font-size: 12.5px; font-weight: 600; letter-spacing: .02em; color: var(--ink-soft);
+}
+.pickhead b { font-weight: 600; color: var(--ink); }
+
+.shoplink { text-align: left; display: inline-flex; align-items: center; }
+.shoplink:hover { color: var(--emerald); }
+.sale-until { font-size: 13px; color: var(--danger); font-weight: 600; margin-top: 2px; }
