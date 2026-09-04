@@ -53,7 +53,11 @@ export async function bagScreen({ onOpen, onCheckout }) {
    * in its own right, not a sheet over a stub, so there is never a "one
    * moment…" with nothing behind it. */
   if (!account.signedIn || !(await api.meBuyer().catch(() => null))) {
-    return gateScreen({ onDone: () => onCheckout.refresh(), onCancel: () => history.back() });
+    api.site('gate_seen');
+    return gateScreen({
+      onDone: () => { api.site('signup_done'); onCheckout.refresh(); },
+      onCancel: () => { api.site('gate_cancelled'); history.back(); }
+    });
   }
 
   const lines = await bagLines();
@@ -112,7 +116,7 @@ export async function bagScreen({ onOpen, onCheckout }) {
       const [minus, plus] = row.querySelectorAll('.stepper button');
       minus.addEventListener('click', () => { store.setQty(l.key, l.qty - 1); onCheckout.refresh(); });
       plus.addEventListener('click', () => { store.setQty(l.key, l.qty + 1); onCheckout.refresh(); });
-      row.querySelector('.rm').addEventListener('click', () => { store.removeFromBag(l.key); toast('Removed'); onCheckout.refresh(); });
+      row.querySelector('.rm').addEventListener('click', () => { store.removeFromBag(l.key); api.site('bag_remove'); toast('Removed'); onCheckout.refresh(); });
       row.querySelector('.ph').addEventListener('click', () => onOpen(l.id));
       group.append(row);
     }
@@ -155,6 +159,12 @@ export async function checkoutScreen({ onBack, onPlaced }) {
   // rendering a screen that cannot be completed.
   const who = account.signedIn ? await api.meBuyer().catch(() => null) : null;
   if (!who) { onBack(); return el('<div class="screen"></div>'); }
+  api.site('checkout_start');
+
+  /* Leaving checkout without an order is the single most valuable thing to
+     count: it is the difference between people who wanted to buy and people
+     who did. Hooked to the screen's own leave event below, once root exists. */
+  let placedOne = false;
   const sellers = await api.sellers();
   const saved = store.get().contact || {};
   const me = account.profile || {};
@@ -183,6 +193,9 @@ export async function checkoutScreen({ onBack, onPlaced }) {
       <div class="sticky-buy" id="foot"></div>
     </div>`);
   root.querySelector('.back').addEventListener('click', onBack);
+  root.addEventListener('screen:leave', () => {
+    if (!placedOne) api.site('checkout_abandon');
+  });
   const body = root.querySelector('#body');
   const foot = root.querySelector('#foot');
 
@@ -400,6 +413,7 @@ export async function checkoutScreen({ onBack, onPlaced }) {
     } catch (err) {
       // The server's own words: "not enough stock", "a listing is no longer
       // available", the cash limit. Far more use than "try again".
+      api.site('checkout_field_error', (err?.message || '').slice(0, 40));
       toast(err?.message || 'Could not place the order — try again');
       console.error(err);
       btn.disabled = false;
@@ -419,6 +433,8 @@ export async function checkoutScreen({ onBack, onPlaced }) {
       code: final.code, placed_at: final.placed_at,
       total: final.totals.total, phone: normalisePhone(form.phone)
     });
+    placedOne = true;
+    api.site('order_placed');
     store.clearBag();
     onPlaced(final.code);
   }
@@ -633,6 +649,7 @@ export async function orderScreen({ code, onHome, onOrders }) {
       btn.textContent = 'Cancelling…';
       try {
         await api.cancelOrder(order.code, order.contact.phone);
+        api.site('order_cancelled');
         toast('Order cancelled');
         onOrders();
       } catch (err) {

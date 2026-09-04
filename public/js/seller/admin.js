@@ -270,6 +270,89 @@ async function orders() {
   return wrap;
 }
 
+/* -------------------------------------------------------------- analytics -- */
+/* Everything, for whoever runs the place. Sellers see their own funnel in the
+   workspace; this is the half that is about the marketplace rather than about
+   one shop, and it stays here. */
+async function analytics() {
+  const a = await rpc('admin_analytics', { p_days: 14 });
+  const wrap = el('<div></div>');
+  const n = v => Number(v || 0);
+  const pct = (x, y) => (n(y) ? Math.round((n(x) / n(y)) * 1000) / 10 : null);
+  const f = a.funnel;
+
+  wrap.append(el(`
+    <dl class="stats four">
+      <div><dt>Orders today</dt><dd class="num">${n(a.live.orders_today)}</dd></div>
+      <div><dt>Sold today</dt><dd class="num">${money(a.live.gmv_today)}</dd></div>
+      <div><dt>Cancelled</dt><dd class="num">${a.live.cancel_rate === null ? '—' : a.live.cancel_rate + '%'}</dd></div>
+      <div><dt>Customer refs</dt><dd class="num">${a.refs.used}<small> / ${a.refs.total}</small></dd></div>
+    </dl>`));
+
+  // Four digits is a hard ceiling, so say so before it becomes an outage.
+  if (Number(a.refs.pct) > 70) {
+    wrap.append(el(`<div class="notice bad"><div><b>Customer references are ${a.refs.pct}% used.</b>
+      Four digits allows ${a.refs.total}. Widen to five before they run out.</div></div>`));
+  }
+
+  const steps = [
+    ['Added to a bag', f.bag_add],
+    ['Asked to sign up', f.gate_seen],
+    ['Signed up', f.signup_done],
+    ['Started checkout', f.checkout_start],
+    ['Ordered', f.order_placed]
+  ];
+  const top = Math.max(1, n(f.bag_add));
+  const funnel = el(`<div class="group"><header><h2>Last 14 days</h2><span class="note">where buyers drop off</span></header><div class="funnel"></div></div>`);
+  steps.forEach(([label, v], i) => {
+    const rate = i ? pct(v, steps[i - 1][1]) : null;
+    funnel.querySelector('.funnel').append(el(`
+      <div class="step">
+        <div class="step-head"><b>${label}</b><span class="num">${n(v).toLocaleString('en-PK')}</span>
+          ${rate === null ? '' : `<i class="${rate < 40 ? 'weak' : ''}">${rate}%</i>`}</div>
+        <div class="step-bar"><b style="width:${Math.max(1.5, (n(v) / top) * 100)}%"></b></div>
+      </div>`));
+  });
+  if (n(f.gate_cancelled)) {
+    funnel.append(el(`<div class="notice warn" style="margin:0 15px 15px"><div>
+      <b>${n(f.gate_cancelled)} people backed out at the sign-up screen.</b>
+      That is the cost of asking for an account at the bag — worth watching against orders.</div></div>`));
+  }
+  wrap.append(funnel);
+
+  /* Searches that found nothing are the most actionable rows here: each one is
+     somebody who wanted to buy something we do not stock. */
+  const empty = el(`<div class="group"><header><h2>Searched for, found nothing</h2><span class="note">what to recruit</span></header></div>`);
+  if (!a.empty_searches.length) {
+    empty.append(el('<div class="empty"><p>Nothing yet — every search so far returned something.</p></div>'));
+  } else {
+    for (const e of a.empty_searches) {
+      empty.append(el(`<div class="row admin-row"><div class="ph mono">?</div>
+        <div><h3>“${esc(e.q)}”</h3><div class="meta"><span>${e.n} time${e.n === 1 ? '' : 's'}</span></div></div>
+        <div class="acts"></div></div>`));
+    }
+  }
+  wrap.append(empty);
+
+  const screens = el(`<div class="group"><header><h2>Most opened screens</h2></header><div class="funnel"></div></div>`);
+  const stop = Math.max(1, ...a.screens.map(x => n(x.n)));
+  for (const sc of a.screens) {
+    screens.querySelector('.funnel').append(el(`
+      <div class="step">
+        <div class="step-head"><b>${esc(sc.name || 'deck')}</b><span class="num">${n(sc.n)}</span></div>
+        <div class="step-bar"><b style="width:${Math.max(1.5, (n(sc.n) / stop) * 100)}%"></b></div>
+      </div>`));
+  }
+  wrap.append(screens);
+
+  const stalls = n(a.totals.stall);
+  if (stalls) {
+    wrap.append(el(`<div class="notice info"><div><b>${stalls} long pauses</b> on a screen with no
+      navigation in 25 seconds. Reading, stuck, or gone — the screens list above says which.</div></div>`));
+  }
+  return wrap;
+}
+
 /* ------------------------------------------------------------------ shell -- */
 export async function adminSuite({ alsoASeller, onSwitchToShop }) {
   const app = document.getElementById('app');
@@ -289,6 +372,7 @@ export async function adminSuite({ alsoASeller, onSwitchToShop }) {
           <button data-tab="sellers">Shops<span class="count num">${stats.sellers_active}</span></button>
           <button data-tab="listings">Listings<span class="count num">${stats.listings_live}</span></button>
           <button data-tab="reports">Reports<span class="count num">${stats.reports_open}</span></button>
+          <button data-tab="analytics">Analytics</button>
           <button data-tab="orders">Orders<span class="count num">${stats.orders_total}</span></button>
         </nav>
         <dl class="stats four">
@@ -342,6 +426,8 @@ export async function adminSuite({ alsoASeller, onSwitchToShop }) {
       pane.append(await listings(render, filter));
     } else if (tab === 'reports') {
       pane.append(await reports(render));
+    } else if (tab === 'analytics') {
+      pane.append(await analytics());
     } else {
       pane.append(await orders());
     }

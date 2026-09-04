@@ -59,8 +59,33 @@ let current = null;
    friction the no-account decision exists to avoid. */
 function accountLink() {
   if (!account.signedIn) return null;
-  const a = el(`<a class="acct-chip" href="#/account" aria-label="Your account">${ICON.user}</a>`);
+  return el(`<a class="acct-chip" href="#/account" aria-label="Your account">${ICON.user}</a>`);
+}
+
+/* Messages, on every screen with a header.
+ *
+ * It used to be reachable only from a link inside the bag, which is nowhere: a
+ * buyer who asked a shop a question had no way back to the answer. The badge is
+ * the point — an unanswered reply that nobody can find is worse than no
+ * messaging at all. */
+let unreadSeen = 0;
+function messagesLink() {
+  const a = el(`
+    <a class="acct-chip msg-chip" href="#/inbox" aria-label="Messages">
+      ${ICON.chat}${unreadSeen ? `<span class="msg-dot" aria-label="${unreadSeen} unread"></span>` : ''}
+    </a>`);
   return a;
+}
+
+async function refreshUnread() {
+  try {
+    const threads = await api.msg.threads();
+    unreadSeen = threads.reduce((n, t) => n + (t.unread || 0), 0);
+    for (const chip of document.querySelectorAll('.msg-chip')) {
+      chip.querySelector('.msg-dot')?.remove();
+      if (unreadSeen) chip.append(el('<span class="msg-dot"></span>'));
+    }
+  } catch { /* messaging is not worth an error on the deck */ }
 }
 
 async function paint(builder, { tab = null } = {}) {
@@ -71,8 +96,14 @@ async function paint(builder, { tab = null } = {}) {
   app.replaceChildren(screen);
   // Slot the account chip into whichever screen has a header.
   const top = screen.querySelector('.top');
-  const chip = accountLink();
-  if (top && chip && !top.querySelector('.acct-chip')) top.append(chip);
+  if (top && !top.querySelector('.acct-chip')) {
+    const row = el('<div class="head-actions"></div>');
+    row.append(messagesLink());
+    const chip = accountLink();
+    if (chip) row.append(chip);
+    top.append(row);
+    refreshUnread();
+  }
   if (tab) app.append(tabBar(tab));
   app.setAttribute('aria-busy', 'false');
   // Each screen owns its own scroll pane, so a new screen must start at its top
@@ -81,9 +112,22 @@ async function paint(builder, { tab = null } = {}) {
   scrollTo(0, 0);
 }
 
+/* What people look at, and where they stop.
+ *
+ * A "stall" is 25 seconds on one screen with no navigation — long enough that
+ * they are reading, stuck, or gone. It is the cheapest signal there is for
+ * finding the screen that is not working. */
+let stallTimer = null;
+function measureScreen(name) {
+  api.site('screen', name);
+  clearTimeout(stallTimer);
+  stallTimer = setTimeout(() => api.site('stall', name), 25000);
+}
+
 async function route() {
   const [, name, arg] = (location.hash || '#/deck').split('/');
   const state = store.get();
+  measureScreen(name || 'deck');
 
   if (!state.onboarded && name !== 'onboard') return go('#/onboard');
 

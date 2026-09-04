@@ -528,3 +528,25 @@
   .coach { animation: none !important; }
   .deck.feed-swap .swipe-card { animation: none !important; }
 }
+
+/* ---- mobile, for the components defined in this file -------------------- */
+/* Beside their components rather than reached into from app.css — the same rule
+   scripts/lint-css.mjs exists to enforce, and the same mistake as last time. */
+.thread, .composer, .filter-bar {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.composer { padding-bottom: max(env(safe-area-inset-bottom), 11px); }
+
+@media (max-width: 420px) {
+  .filter-bar { padding-left: 12px; padding-right: 12px; }
+  .sizes .size { min-width: 42px; height: 40px; }
+  .capsules { margin-left: 0; margin-right: 0; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .capsules { display: none; }
+}
+@media (hover: none) {
+  .filter-pill:hover { background: var(--card); }
+  .filter-pill[data-on="true"]:hover { background: var(--emerald); }
+}

@@ -255,6 +255,8 @@ export async function productScreen({ id, onBack, onBag, onShop, onMessage, onOp
       toast('Link copied');
     } catch (err) {
       if (err?.name !== 'AbortError') toast('Could not share that');
+    } finally {
+      api.site('share');
     }
   });
 
@@ -307,6 +309,7 @@ export async function productScreen({ id, onBack, onBag, onShop, onMessage, onOp
     const chosen = picker.selected();
     store.addToBag(p.id, 1, chosen ? { variant_id: chosen.id, label: [chosen.size, chosen.colour].filter(Boolean).join(' / ') } : null);
     api.track('add_to_bag', p.id);
+    api.site('bag_add');
     // The thumbnail flies to the bag before we navigate, so the count changing
     // is explained rather than just noticed. onBag() runs either way.
     magnetToBag(root.querySelector('.frames img'), {
@@ -497,6 +500,8 @@ export function legalScreen({ onBack }) {
       toast('Link copied');
     } catch (err) {
       if (err?.name !== 'AbortError') toast('Could not share that');
+    } finally {
+      api.site('share');
     }
   });
 

@@ -12,7 +12,7 @@
  * current — a cached "in stock" that is not is worse than a slow page, and a
  * cached order status is exactly the thing a worried buyer is refreshing for.
  */
-const VERSION = 'nova-v8';
+const VERSION = 'nova-v9';
 const SHELL = `${VERSION}-shell`;
 const PHOTOS = `${VERSION}-photos`;
 
@@ -23,7 +23,7 @@ const SHELL_FILES = [
   './css/app.css', './css/motion.css', './css/seller.css',
   './js/app.js', './js/api.js', './js/store.js', './js/ui.js', './js/views.js',
   './js/deck.js', './js/checkout.js', './js/motion.js', './js/shop.js',
-  './js/account.js', './js/money.mjs',
+  './js/account.js', './js/browse.js', './js/money.mjs',
   './favicon.svg', './icon-192.png', './site.webmanifest'
 ];
 
