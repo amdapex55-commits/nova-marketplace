@@ -58,16 +58,26 @@ export const auth = {
   get session() { return session; },
   get signedIn() { return !!session?.access_token; },
 
+  /* Email confirmation is OFF on this project, so signup returns a session and
+     the seller is straight in. It was on, but nothing could deliver the mail:
+     no SMTP provider is connected, and Supabase's shared sender throttles to a
+     handful an hour — so the confirmation link the screen promised often never
+     arrived, which is a worse failure than not asking for one.
+     What actually gates a shop is a person: every new seller lands on `pending`
+     and reaches no buyer until an admin approves them by hand. See
+     `register_seller()`. If SMTP is ever connected, turn confirmation back on
+     and this function starts returning no session — handle that then. */
   async signUp(email, password) {
     const body = await parse(await fetch(`${cfg().SUPABASE_URL}/auth/v1/signup`, {
       method: 'POST',
       headers: { apikey: cfg().SUPABASE_ANON_KEY, 'content-type': 'application/json' },
       body: JSON.stringify({ email, password })
     }));
-    // With email confirmation on, signup returns a user but no session — the
-    // seller has to click the link first. Say so rather than looking broken.
-    if (body?.access_token) save(body);
-    return { needsConfirmation: !body?.access_token, user: body?.user || body };
+    if (body?.access_token) { save(body); return { signedIn: true, user: body.user }; }
+    // Belt and braces: if confirmation is ever switched back on, sign in with
+    // the credentials we already have rather than leaving them on a dead end.
+    await this.signIn(email, password);
+    return { signedIn: true, user: session?.user };
   },
 
   async signIn(email, password) {
