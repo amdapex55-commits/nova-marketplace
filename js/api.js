@@ -10,7 +10,10 @@
 import { store } from './store.js';
 
 const cfg = () => window.NOVAMKT;
-const live = () => !!cfg().SUPABASE_URL;
+/* A real Supabase project now exists and seller.html uses it — but the buyer
+   app's read path still comes from fixtures, so this must not key off the URL
+   being present. See BUYER_BACKEND in config.js. */
+const live = () => cfg().BUYER_BACKEND === 'live' && !!cfg().SUPABASE_URL;
 
 let cache = null;
 async function catalog() {
