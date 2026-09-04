@@ -625,14 +625,20 @@ test('the deck ranks on interest and promotion, and never returns a seen card', 
   assert.ok(!JSON.parse(next).items.some(p => p.id === first), 'a seen card must not come back');
 
   // Promotion is what sellers pay for, so it has to actually move a card up.
+  // Promote whatever ranks LAST rather than a chosen title: the jitter term
+  // means any given listing may already be first, and a card that cannot rise
+  // fails a test about rising for a reason that has nothing to do with it.
   const [[plain]] = await sql(`select deck('{}'::text[], '{}'::uuid[], 50, 0)::text;`, { role: 'anon' });
-  const before = JSON.parse(plain).items.findIndex(p => p.title === 'Riso Print Quarterly');
-  const [[rid]] = await sql(`select id from products where title = 'Riso Print Quarterly';`);
-  await sql(`update products set promoted = true where id = '${rid}';`);
+  const order = JSON.parse(plain).items;
+  const last = order[order.length - 1];
+  assert.ok(order.length >= 3, 'need a few cards for this to mean anything');
+
+  await sql(`update products set promoted = true where id = '${last.id}';`);
   const [[lifted]] = await sql(`select deck('{}'::text[], '{}'::uuid[], 50, 0)::text;`, { role: 'anon' });
-  const after = JSON.parse(lifted).items.findIndex(p => p.title === 'Riso Print Quarterly');
-  assert.ok(after < before, `promoting should lift a card: was ${before}, now ${after}`);
-  await sql(`update products set promoted = false where id = '${rid}';`);
+  const after = JSON.parse(lifted).items.findIndex(p => p.id === last.id);
+  assert.ok(after < order.length - 1,
+    `promoting should lift a card: was last of ${order.length}, now ${after}`);
+  await sql(`update products set promoted = false where id = '${last.id}';`);
 });
 
 test('the deck never offers something out of stock or from a suspended shop', async () => {
