@@ -524,17 +524,3 @@
   .coach { animation: none !important; }
   .deck.feed-swap .swipe-card { animation: none !important; }
 }
-
-/* ---- desktop, for the components defined in this file ------------------- */
-/* Kept here rather than in app.css: a stylesheet that reaches across to
-   re-declare another's components is how the two end up fighting, and it is
-   what scripts/lint-css.mjs exists to catch. */
-@media (min-width: 900px) {
-  .filter-bar, .result-count, .track-card, .thread, .composer, .shop-hero {
-    max-width: var(--measure); margin-left: auto; margin-right: auto;
-  }
-  .shop-hero { border-radius: 0 0 20px 20px; }
-  .gate-hero { border-radius: 18px 18px 0 0; }
-  .composer { border-radius: 0 0 16px 16px; }
-  .capsules { max-width: 460px; margin-left: auto; margin-right: auto; }
-}

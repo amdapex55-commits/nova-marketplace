@@ -832,7 +832,7 @@ async function render() {
 
 
   const shell = el(`
-    <div>
+    <div class="workspace">
       <div class="bar">
         <span class="mark">nova<em>.</em></span>
         <span class="state ${esc(me.status)}">${esc(me.status)}</span>
