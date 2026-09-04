@@ -33,7 +33,7 @@ export function deckScreen({ onOpen }) {
     <div class="screen">
       <div class="deck-wrap">
         <div class="capsules" role="tablist" aria-label="What to swipe"></div>
-        <div class="deck-head">
+        <div class="deck-head top">
           <h1 class="display" id="deck-title">For you</h1>
           <span class="count" id="deck-count"></span>
         </div>

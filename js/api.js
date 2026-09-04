@@ -387,6 +387,35 @@ export const api = {
      product per day server-side, never one row per view. A 500 MB free-tier
      database will not survive raw event logging, and the seller only ever sees
      the daily number anyway. */
+  /* Site-wide measurement, separate from per-product stats.
+     Same discipline: buffered, batched, counters not logs, and never allowed
+     to break anything it is measuring. */
+  site: (() => {
+    let buffer = [];
+    const flush = () => {
+      if (!buffer.length) return;
+      const batch = buffer;
+      buffer = [];
+      if (!live()) { console.debug('[site]', batch.map(e => e.metric).join(',')); return; }
+      fetch(new URL('/rest/v1/rpc/record_site', cfg().SUPABASE_URL), {
+        method: 'POST', keepalive: true,
+        headers: {
+          apikey: cfg().SUPABASE_ANON_KEY,
+          authorization: `Bearer ${account.token || cfg().SUPABASE_ANON_KEY}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({ events: batch })
+      }).catch(() => { /* measurement must never break a purchase */ });
+    };
+    setInterval(flush, 10000);
+    addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+    addEventListener('pagehide', flush);
+    return (metric, detail = '') => {
+      buffer.push({ metric, detail: String(detail).slice(0, 60) });
+      if (buffer.length >= 40) flush();
+    };
+  })(),
+
   track: (() => {
     let buffer = [];
     const flush = () => {

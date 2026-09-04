@@ -22,7 +22,7 @@ function bannerRail(banners, onGo) {
         ${b.sub ? `<span>${esc(b.sub)}</span>` : ''}
         <i>${esc(b.cta)} →</i>
       </button>`);
-    card.addEventListener('click', () => onGo(b.target));
+    card.addEventListener('click', () => { api.site('banner_click', b.headline); onGo(b.target); });
     rail.append(card);
   }
   return rail;
@@ -42,7 +42,7 @@ function categoryRail({ tree, group, leaf, onGroup, onLeaf }) {
     if (!g.live) continue;                       // never offer an empty group
     const c = el(`<button class="chip" aria-pressed="${group === g.slug}">${
       g.emoji ? `<span class="cat-emoji">${g.emoji}</span>` : ''}${esc(g.label)}</button>`);
-    c.addEventListener('click', () => onGroup(group === g.slug ? null : g.slug));
+    c.addEventListener('click', () => { api.site('category_used', g.slug); onGroup(group === g.slug ? null : g.slug); });
     top.append(c);
   }
   wrap.append(top);
@@ -56,7 +56,7 @@ function categoryRail({ tree, group, leaf, onGroup, onLeaf }) {
     for (const c of chosen.children) {
       if (!c.live) continue;
       const b = el(`<button class="chip small" aria-pressed="${leaf === c.slug}">${esc(c.label)}<span class="cat-n">${c.live}</span></button>`);
-      b.addEventListener('click', () => onLeaf(leaf === c.slug ? null : c.slug));
+      b.addEventListener('click', () => { api.site('category_used', c.slug); onLeaf(leaf === c.slug ? null : c.slug); });
       sub.append(b);
     }
     wrap.append(sub);
@@ -128,7 +128,7 @@ export async function browseScreen({ onOpen, onSearch }) {
     };
     pill(`Filters${activeCount() ? `<span class="filter-count">${activeCount()}</span>` : ''}`,
       activeCount() > 0, filterSheet);
-    pill('On sale', !!filters.onSale, () => { filters.onSale = !filters.onSale; load(); });
+    pill('On sale', !!filters.onSale, () => { filters.onSale = !filters.onSale; api.site('filter_used', 'on_sale'); load(); });
     pill(filters.sort === 'cheap' ? 'Cheapest' : filters.sort === 'dear' ? 'Dearest' : 'Newest',
       filters.sort !== 'new', () => {
         filters.sort = filters.sort === 'new' ? 'cheap' : filters.sort === 'cheap' ? 'dear' : 'new';
@@ -283,6 +283,7 @@ export function searchScreen({ onOpen }) {
     suggest.replaceChildren();
     const { items } = await api.search(q);
     api.recordSearch(q, items.length);
+    api.site(items.length ? 'search_ok' : 'search_empty', q);
     if (!items.length) {
       grid.append(el(`
         <div class="empty" style="grid-column:1/-1">

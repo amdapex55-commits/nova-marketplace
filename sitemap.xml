@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://amdapex55-commits.github.io/nova-marketplace/</loc>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-  </url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/</loc><lastmod>2026-09-04</lastmod><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/seller.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/l/97152500-c56f-4c6c-bdd9-63286ec36af9.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/l/496297e9-1a3d-476c-a025-559a53a3dfe9.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/l/5df231f6-264f-4b17-9ad3-fd2cddf7535f.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/l/e90c4363-2106-4f43-bd9a-f0f15993c96f.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/l/38464f12-4c49-4fc3-b6b9-18b62182badc.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/l/20cfe7ec-4956-4d3f-878a-be3a10d4a29a.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/l/bf7cb561-2564-4001-b667-d2c967d1c54a.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://amdapex55-commits.github.io/nova-marketplace/l/f0aa8a07-f114-4da8-bf1d-ab8e7a8a52d9.html</loc><lastmod>2026-09-04</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>
 </urlset>
