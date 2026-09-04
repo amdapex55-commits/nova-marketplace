@@ -1,0 +1,351 @@
+/* Screens added in the second wave: the variant picker, a shop's own page,
+ * messages, reviews, and the offers feed.
+ *
+ * Kept out of views.js because that file is already the four original screens
+ * and this is a different job — but it uses the same tile() so the grid looks
+ * identical wherever it appears.
+ */
+import { api } from './api.js';
+import { store } from './store.js';
+import { el, esc, ICON, money, toast } from './ui.js';
+import { burst, pop } from './motion.js';
+
+const STAR = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1Z"/></svg>';
+
+export const stars = (n, count = null) => {
+  const filled = Math.round(Number(n) || 0);
+  return `<span class="stars" role="img" aria-label="${filled} out of 5">${
+    [1, 2, 3, 4, 5].map(i => `<span class="${i <= filled ? 'on' : 'off'}">${STAR}</span>`).join('')
+  }</span>${count !== null ? `<span style="font-size:13px;color:var(--ink-faint);margin-left:6px">${count}</span>` : ''}`;
+};
+
+export const initials = name =>
+  (name || '?').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+
+/* Rs 3,200 with the old price struck through and the size of the cut, when
+   there is one. Everywhere a price appears, so a sale never shows in one place
+   and not another. */
+export function priceHtml(p) {
+  if (!p.was) return `<span class="num">${money(p.price)}</span>`;
+  const cut = Math.round((1 - p.price / p.was) * 100);
+  return `<span class="num">${money(p.price)}</span><span class="was num">${money(p.was)}</span>` +
+         `<span class="cut">−${cut}%</span>`;
+}
+
+/* --------------------------------------------------------- variant picker -- */
+/* Returns { node, selected(), require() }. `require()` shakes the row and
+   returns false when nothing is picked — a nudge rather than a red error,
+   because not having chosen yet is not a mistake. */
+export function variantPicker(product) {
+  const variants = product.variants || [];
+  const node = el('<div style="display:flex;flex-direction:column;gap:16px"></div>');
+  if (!variants.length) return { node, selected: () => null, require: () => true };
+
+  const colours = [...new Map(variants.filter(v => v.colour)
+    .map(v => [v.colour, { name: v.colour, hex: v.colour_hex }])).values()];
+  const sizes = [...new Set(variants.filter(v => v.size).map(v => v.size))];
+
+  let colour = colours.length === 1 ? colours[0].name : null;
+  let size = null;
+
+  const stockFor = (s, c) => variants
+    .filter(v => (s == null || v.size === s) && (c == null || v.colour === c))
+    .reduce((n, v) => n + v.stock, 0);
+
+  let colourRow, sizeRow;
+
+  const drawColours = () => {
+    if (!colours.length) return;
+    colourRow.querySelector('.swatches').replaceChildren(...colours.map(c => {
+      const out = stockFor(null, c.name) === 0;
+      const b = el(`<button class="swatch" aria-pressed="${colour === c.name}" ${out ? 'disabled' : ''}
+        style="background:${esc(c.hex || '#ccc')}" aria-label="${esc(c.name)}${out ? ', sold out' : ''}"></button>`);
+      b.addEventListener('click', () => {
+        colour = colour === c.name ? null : c.name;
+        // Picking a colour can invalidate the chosen size, so clear it rather
+        // than leaving a combination that does not exist selected.
+        if (size && stockFor(size, colour) === 0) size = null;
+        draw();
+      });
+      return b;
+    }));
+    colourRow.querySelector('.pickname').textContent = colour || 'Pick a colour';
+  };
+
+  const drawSizes = () => {
+    if (!sizes.length) return;
+    sizeRow.querySelector('.sizes').replaceChildren(...sizes.map(s => {
+      const left = stockFor(s, colour);
+      const b = el(`<button class="size" aria-pressed="${size === s}" ${left === 0 ? 'disabled' : ''}>
+        ${esc(s)}${left > 0 && left <= 3 ? `<span class="left">${left}</span>` : ''}</button>`);
+      b.addEventListener('click', () => { size = size === s ? null : s; draw(); });
+      return b;
+    }));
+  };
+
+  const draw = () => { drawColours(); drawSizes(); };
+
+  if (colours.length) {
+    colourRow = el(`<div>
+      <div class="pickhead"><span>Colour</span><b class="pickname"></b></div>
+      <div class="swatches"></div></div>`);
+    node.append(colourRow);
+  }
+  if (sizes.length) {
+    sizeRow = el(`<div>
+      <div class="pickhead"><span>Size</span></div>
+      <div class="sizes"></div></div>`);
+    node.append(sizeRow);
+  }
+  draw();
+
+  const selected = () => variants.find(v =>
+    (!sizes.length || v.size === size) && (!colours.length || v.colour === colour)) || null;
+
+  return {
+    node,
+    selected,
+    require() {
+      if (selected()) return true;
+      const row = (sizes.length && !size ? sizeRow : colourRow) || node;
+      row.classList.remove('needs-pick');
+      void row.offsetWidth;
+      row.classList.add('needs-pick');
+      toast(sizes.length && !size ? 'Pick a size first' : 'Pick a colour first');
+      return false;
+    }
+  };
+}
+
+/* ---------------------------------------------------------- the shop page -- */
+export async function shopScreen({ id, onOpen, onBack, onMessage }) {
+  const s = await api.shop(id);
+  if (!s) return el('<div class="screen"><div class="empty"><h2>This shop is closed</h2><p>It may have been suspended, or the link is wrong.</p></div></div>');
+
+  const root = el(`
+    <div class="screen">
+      <div class="scroll">
+        <div class="shop-hero">
+          <button class="back" aria-label="Back" style="color:#fff;margin:0 0 6px -6px">${ICON.back}</button>
+          <div class="shop-avatar">${esc(initials(s.brand_name))}</div>
+          <h1>${esc(s.brand_name)}</h1>
+          <div class="sub">${esc(s.city)} · ships in ${s.dispatch_days === 0 ? 'the same day' : `${s.dispatch_days} day${s.dispatch_days === 1 ? '' : 's'}`}</div>
+          <div class="shop-facts">
+            <div><b>${s.live}</b><span>listings</span></div>
+            <div><b>${s.delivered}</b><span>delivered</span></div>
+            <div><b>${s.rating ? Number(s.rating).toFixed(1) : '—'}</b><span>${s.reviews} review${s.reviews === 1 ? '' : 's'}</span></div>
+          </div>
+        </div>
+        <div class="pad" style="padding:14px">
+          <button class="btn ghost block" id="ask">Message this shop</button>
+        </div>
+        <div class="grid"></div>
+      </div>
+    </div>`);
+
+  root.querySelector('.back').addEventListener('click', onBack);
+  root.querySelector('#ask').addEventListener('click', () => onMessage(s.id, null));
+
+  const grid = root.querySelector('.grid');
+  const { tile } = await import('./views.js');
+  if (!s.products.length) {
+    grid.replaceWith(el('<div class="empty"><h2>Nothing listed yet</h2><p>This shop has not put anything up.</p></div>'));
+  } else {
+    for (const p of s.products) grid.append(tile(p, { onOpen }));
+  }
+  return root;
+}
+
+/* ------------------------------------------------------------- the offers -- */
+export async function offersScreen({ onOpen }) {
+  const items = await api.offers();
+  const root = el(`
+    <div class="screen">
+      <div class="top"><h1>Offers</h1></div>
+      <div class="scroll"><div class="grid"></div></div>
+    </div>`);
+  const grid = root.querySelector('.grid');
+  if (!items.length) {
+    grid.replaceWith(el(`
+      <div class="empty">
+        <h2>No offers right now</h2>
+        <p>When a shop puts something on sale it appears here first. Worth checking back.</p>
+      </div>`));
+    return root;
+  }
+  const { tile } = await import('./views.js');
+  for (const p of items) grid.append(tile(p, { onOpen }));
+  return root;
+}
+
+/* --------------------------------------------------------------- messages -- */
+export async function inboxScreen({ onOpen }) {
+  const threads = await api.msg.threads();
+  const root = el(`
+    <div class="screen">
+      <div class="top"><h1>Messages</h1></div>
+      <div class="scroll"><div class="rows"></div></div>
+    </div>`);
+  const rows = root.querySelector('.rows');
+  if (!threads.length) {
+    rows.replaceWith(el(`
+      <div class="empty">
+        <h2>No messages yet</h2>
+        <p>Ask a shop about a size, a colour, or how soon they can send it. Your questions live here.</p>
+      </div>`));
+    return root;
+  }
+  for (const t of threads) {
+    const row = el(`
+      <button class="line" style="grid-template-columns:44px 1fr auto;text-align:left;width:100%">
+        <div class="ph" style="aspect-ratio:1;border-radius:12px;display:grid;place-items:center;background:var(--emerald-soft);color:var(--emerald-dark);font-weight:700">${esc(initials(t.seller))}</div>
+        <div>
+          <h3>${esc(t.seller)}</h3>
+          <div class="sub">${t.from === 'seller' ? '' : 'You: '}${esc((t.preview || '').slice(0, 60))}</div>
+          ${t.product ? `<div class="sub" style="color:var(--ink-faint)">about ${esc(t.product)}</div>` : ''}
+        </div>
+        ${t.unread ? '<span class="unread-dot" aria-label="unread"></span>' : ''}
+      </button>`);
+    row.addEventListener('click', () => onOpen(t.id));
+    rows.append(row);
+  }
+  return root;
+}
+
+export async function threadScreen({ id, onBack }) {
+  let data = await api.msg.thread(id);
+  if (!data) return el('<div class="screen"><div class="empty"><h2>Conversation not found</h2><p>It may have been opened on another device.</p></div></div>');
+  api.msg.read(id);
+
+  const root = el(`
+    <div class="screen">
+      <div class="top">
+        <button class="back" aria-label="Back">${ICON.back}</button>
+        <h1 style="font-size:19px">${esc(data.seller)}</h1>
+      </div>
+      <div class="scroll"><div class="thread"></div></div>
+      <form class="composer">
+        <textarea placeholder="Write a message…" rows="1" aria-label="Your message"></textarea>
+        <button class="btn" type="submit">Send</button>
+      </form>
+    </div>`);
+  root.querySelector('.back').addEventListener('click', onBack);
+
+  const thread = root.querySelector('.thread');
+  const scroll = root.querySelector('.scroll');
+  const box = root.querySelector('textarea');
+
+  const paint = () => {
+    thread.replaceChildren();
+    if (data.product) {
+      thread.append(el(`<div class="notice info" style="margin:0 0 6px"><div>About <b>${esc(data.product)}</b></div></div>`));
+    }
+    for (const m of data.messages) {
+      thread.append(el(`
+        <div class="bubble ${esc(m.sender)}">${esc(m.body)}
+          <span class="at">${new Date(m.at).toLocaleTimeString('en-PK', { hour: 'numeric', minute: '2-digit' })}</span>
+        </div>`));
+    }
+    requestAnimationFrame(() => scroll.scrollTo({ top: scroll.scrollHeight, behavior: 'smooth' }));
+  };
+  paint();
+
+  box.addEventListener('input', () => {
+    box.style.height = 'auto';
+    box.style.height = Math.min(120, box.scrollHeight) + 'px';
+  });
+
+  root.querySelector('.composer').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const body = box.value.trim();
+    if (!body) return;
+    box.value = '';
+    box.style.height = 'auto';
+    // Show it immediately and reconcile — a message that waits for Seoul before
+    // appearing feels broken on a slow connection.
+    data.messages.push({ id: 'pending', sender: 'buyer', body, at: new Date().toISOString() });
+    paint();
+    try { data = await api.msg.send(id, body); paint(); }
+    catch (err) { toast(err.message || 'Could not send that'); }
+  });
+
+  return root;
+}
+
+/* ---------------------------------------------------------------- reviews -- */
+export function reviewSheet({ code, phone, items, onDone }) {
+  const sheet = el(`
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Leave a review">
+      <div class="sheet-in">
+        <div class="sheet-bar">
+          <h2>How was it?</h2>
+          <button class="btn ghost" id="close" style="min-height:34px;padding:0 12px;font-size:13px">Close</button>
+        </div>
+        <div id="list"></div>
+      </div>
+    </div>`);
+  const list = sheet.querySelector('#list');
+
+  for (const item of items) {
+    let rating = item.rating || 0;
+    const card = el(`
+      <div class="group">
+        <header><h2>${esc(item.title)}</h2>${item.reviewed ? '<span class="note">reviewed</span>' : ''}</header>
+        <div class="inner">
+          <div class="star-pick"></div>
+          <div class="field"><textarea placeholder="Anything worth telling the next buyer? Optional."></textarea></div>
+          <button class="btn block" ${rating ? '' : 'disabled'}>${item.reviewed ? 'Update' : 'Send review'}</button>
+        </div>
+      </div>`);
+    const pick = card.querySelector('.star-pick');
+    const send = card.querySelector('button.btn');
+    const paintStars = () => {
+      pick.replaceChildren(...[1, 2, 3, 4, 5].map(i => {
+        const b = el(`<button class="${i <= rating ? 'lit' : ''}" aria-label="${i} star${i === 1 ? '' : 's'}">${STAR}</button>`);
+        b.addEventListener('click', () => { rating = i; send.disabled = false; paintStars(); pop(b); });
+        return b;
+      }));
+    };
+    paintStars();
+
+    send.addEventListener('click', async () => {
+      send.disabled = true;
+      send.textContent = 'Sending…';
+      try {
+        await api.leaveReview(code, phone, item.product_id, rating, card.querySelector('textarea').value.trim());
+        burst(card, 8);
+        toast('Thank you');
+        item.reviewed = true;
+        onDone?.();
+        sheet.remove();
+      } catch (err) {
+        toast(err.message || 'Could not send that review');
+        send.disabled = false;
+        send.textContent = 'Send review';
+      }
+    });
+    list.append(card);
+  }
+
+  const close = () => sheet.remove();
+  sheet.querySelector('#close').addEventListener('click', close);
+  sheet.addEventListener('click', ev => { if (ev.target === sheet) close(); });
+  document.body.append(sheet);
+}
+
+/* Reviews under a listing. */
+export async function reviewList(productId) {
+  const rows = await api.reviews(productId);
+  if (!rows.length) return null;
+  const wrap = el(`<div class="group"><header><h2>What buyers said</h2><span class="note">${rows.length}</span></header></div>`);
+  for (const r of rows) {
+    wrap.append(el(`
+      <div class="review">
+        <div class="who">${stars(r.rating)}<b>${esc(r.by)}</b>
+          <span style="margin-left:auto;font-size:12.5px;color:var(--ink-faint)">
+            ${new Date(r.at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short' })}</span></div>
+        ${r.body ? `<p>${esc(r.body)}</p>` : ''}
+      </div>`));
+  }
+  return wrap;
+}

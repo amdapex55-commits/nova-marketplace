@@ -225,7 +225,7 @@ async function listings() {
 
 async function editor(productId = null) {
   const existing = productId
-    ? (await db.select('products', `id=eq.${productId}&select=*,photos(id,key,position)`))[0]
+    ? (await db.select('products', `id=eq.${productId}&select=*,photos(id,key,position),variants(id,size,colour,colour_hex,stock,position)`))[0]
     : null;
 
   // { id, key?, preview, variants?, saved } — saved ones already exist in Storage.
@@ -257,6 +257,20 @@ async function editor(productId = null) {
               <div class="thumbs" id="thumbs"></div>
               <input type="file" id="file" accept="image/*" multiple hidden>
             </div>
+            <div class="field">
+              <label>Sizes and colours <span class="hint">leave empty if it comes one way only</span></label>
+              <div id="variants"></div>
+            </div>
+            <div class="two-up">
+              <div class="field">
+                <label for="sale">Sale price <span class="hint">optional</span></label>
+                <input id="sale" type="number" inputmode="numeric" min="1" value="${existing?.sale_price || ''}" placeholder="lower than the price">
+              </div>
+              <div class="field">
+                <label for="saleuntil">Sale ends</label>
+                <input id="saleuntil" type="date" value="${existing?.sale_ends_at ? existing.sale_ends_at.slice(0,10) : ''}">
+              </div>
+            </div>
           </div>
         </div>
         <div class="pad" style="display:flex;flex-direction:column;gap:10px">
@@ -277,6 +291,57 @@ async function editor(productId = null) {
 
   const thumbs = sheet.querySelector('#thumbs');
   const file = sheet.querySelector('#file');
+
+  /* Sizes and colours.
+     A grid of rows rather than a wizard: a seller adding six sizes should be
+     able to see all six at once and fix the typo in the third. `stock` lives on
+     the row, because that is the question they are actually answering — "how
+     many mediums do I have". */
+  let rows = (existing?.variants || []).map(v => ({ ...v }));
+  const vbox = sheet.querySelector('#variants');
+
+  const drawVariants = () => {
+    vbox.replaceChildren();
+    if (!rows.length) {
+      vbox.append(el(`<p style="font-size:13.5px;color:var(--ink-faint);margin:0 0 10px">
+        One price, one stock number. Add sizes if buyers need to choose.</p>`));
+    }
+    rows.forEach((r, i) => {
+      const row = el(`
+        <div class="vrow">
+          <input class="vsize"  placeholder="Size"   value="${esc(r.size || '')}"   aria-label="Size">
+          <input class="vcol"   placeholder="Colour" value="${esc(r.colour || '')}" aria-label="Colour">
+          <input class="vhex"   type="color" value="${esc(r.colour_hex || '#888888')}" aria-label="Colour swatch">
+          <input class="vstock" type="number" min="0" value="${r.stock ?? 0}" aria-label="How many">
+          <button class="vdel" aria-label="Remove this row">&times;</button>
+        </div>`);
+      row.querySelector('.vsize').addEventListener('input', e => { r.size = e.target.value.trim() || null; });
+      row.querySelector('.vcol').addEventListener('input', e => { r.colour = e.target.value.trim() || null; });
+      row.querySelector('.vhex').addEventListener('input', e => { r.colour_hex = e.target.value; });
+      row.querySelector('.vstock').addEventListener('input', e => { r.stock = Math.max(0, Number(e.target.value) || 0); });
+      row.querySelector('.vdel').addEventListener('click', () => { rows.splice(i, 1); drawVariants(); });
+      vbox.append(row);
+    });
+    const add = el('<button class="btn quiet" style="min-height:38px;font-size:14px">+ Add a size or colour</button>');
+    add.addEventListener('click', () => {
+      const last = rows[rows.length - 1];
+      rows.push({ size: '', colour: last?.colour || '', colour_hex: last?.colour_hex || '#888888', stock: 1 });
+      drawVariants();
+      vbox.querySelectorAll('.vsize')[rows.length - 1]?.focus();
+    });
+    vbox.append(add);
+    // Stock is the variants' total once there are any, so the field above stops
+    // being the answer and says so.
+    const stockField = sheet.querySelector('#stock');
+    if (rows.length) {
+      stockField.value = rows.reduce((n, r) => n + (r.stock || 0), 0);
+      stockField.disabled = true;
+      stockField.title = 'Worked out from the sizes below';
+    } else {
+      stockField.disabled = false;
+    }
+  };
+  drawVariants();
 
   const drawThumbs = () => {
     thumbs.replaceChildren();
@@ -330,8 +395,20 @@ async function editor(productId = null) {
     const btn = sheet.querySelector('#save');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
+      const sale = Number(v('sale')) || null;
+      if (sale && sale >= price) { err.hidden = false; err.textContent = 'A sale price has to be lower than the price.'; btn.disabled = false; btn.textContent = existing ? 'Save changes' : 'Save listing'; return; }
+      const named = rows.filter(r => (r.size || '').trim() || (r.colour || '').trim());
+      const combos = new Set(named.map(r => `${r.size || ''}|${r.colour || ''}`));
+      if (combos.size !== named.length) {
+        err.hidden = false; err.textContent = 'Two rows have the same size and colour.';
+        btn.disabled = false; btn.textContent = existing ? 'Save changes' : 'Save listing'; return;
+      }
+
       const fields = {
-        title: v('title'), description: v('desc'), price, stock,
+        title: v('title'), description: v('desc'), price,
+        stock: named.length ? 0 : stock,
+        sale_price: sale,
+        sale_ends_at: v('saleuntil') ? new Date(v('saleuntil') + 'T23:59:59').toISOString() : null,
         interest: v('interest'), condition: v('condition'),
         tags: [v('interest')], city: me.city
       };
@@ -375,6 +452,20 @@ async function editor(productId = null) {
         });
         p.saved = true;
         p.key = key;
+      }
+
+      // Variants are replaced wholesale rather than diffed: a seller editing
+      // sizes is rewriting the set, and the row ids are ours, not theirs.
+      await db.remove('variants', `product_id=eq.${row.id}`);
+      if (named.length) {
+        await db.insert('variants', named.map((r, i) => ({
+          product_id: row.id,
+          size: (r.size || '').trim() || null,
+          colour: (r.colour || '').trim() || null,
+          colour_hex: (r.colour || '').trim() ? r.colour_hex : null,
+          stock: r.stock || 0,
+          position: i
+        })));
       }
 
       // Remove rows the seller deleted, and their objects with them.
@@ -456,11 +547,21 @@ async function orders() {
 
     card.querySelector('.to').insertAdjacentElement('beforebegin', statusRail(s.status));
 
+    if (s.tracking_number) {
+      card.querySelector('.acts').insertAdjacentElement('beforebegin', el(`
+        <div class="track-num" style="margin-top:11px">
+          <span>${esc(s.courier || 'Courier')} · ${esc(s.tracking_number)}</span>
+        </div>`));
+    }
+
     const acts = card.querySelector('.acts');
     for (const [status, label] of NEXT[s.status] || []) {
       const b = el(`<button class="btn ${status === 'refused' ? 'ghost' : ''}">${label}</button>`);
       b.addEventListener('click', async () => {
         if (status === 'refused' && !confirm('Mark this parcel as not fulfilled? The buyer will need to be told.')) return;
+        // Dispatching without a tracking number is what makes "on its way" mean
+        // nothing to the buyer, so this is the moment to ask for it.
+        if (status === 'dispatched') { dispatchSheet(s, render); return; }
         b.disabled = true;
         try { await rpc('set_shipment_status', { p_shipment: s.id, p_status: status }); toast(label); render(); }
         catch (e) { fail(e); b.disabled = false; }
@@ -471,6 +572,142 @@ async function orders() {
     wrap.append(card);
   }
   return wrap;
+}
+
+const COURIERS = ['Leopards', 'TCS', 'PostEx', 'Trax', 'M&P', 'CallCourier', 'BlueEx', 'Daewoo', 'Other'];
+
+/* Handing the parcel over. The tracking number is optional but asked for every
+   time, because "dispatched" with nothing behind it tells the buyer nothing and
+   generates the message the seller then has to answer. */
+function dispatchSheet(shipment, refresh) {
+  const sheet = el(`
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Mark dispatched">
+      <div class="sheet-in">
+        <div class="sheet-bar"><h2>Mark ${esc(shipment.code)} dispatched</h2>
+          <button class="btn ghost" id="close" style="min-height:34px;padding:0 12px;font-size:13px">Close</button></div>
+        <div class="group" style="margin-top:14px"><div class="inner">
+          <div class="field">
+            <label for="courier">Courier</label>
+            <select id="courier">${COURIERS.map(c => `<option${shipment.courier === c ? ' selected' : ''}>${c}</option>`).join('')}</select>
+          </div>
+          <div class="field">
+            <label for="tracking">Tracking number <span class="hint">the buyer sees this</span></label>
+            <input id="tracking" placeholder="e.g. LEO-123456789" value="${esc(shipment.tracking_number || '')}" autocomplete="off" spellcheck="false">
+          </div>
+          <button class="btn block" id="go">Mark dispatched</button>
+          <button class="btn ghost block" id="skip">Dispatch without a number</button>
+          <div class="err" id="derr" role="alert" hidden></div>
+        </div></div>
+      </div>
+    </div>`);
+  const close = () => sheet.remove();
+  sheet.querySelector('#close').addEventListener('click', close);
+  sheet.addEventListener('click', ev => { if (ev.target === sheet) close(); });
+
+  const send = async (withNumber) => {
+    const btn = sheet.querySelector(withNumber ? '#go' : '#skip');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await rpc('set_shipment_status', {
+        p_shipment: shipment.id, p_status: 'dispatched',
+        p_courier: withNumber ? sheet.querySelector('#courier').value : null,
+        p_tracking: withNumber ? sheet.querySelector('#tracking').value.trim() : null
+      });
+      toast('On its way');
+      close();
+      refresh();
+    } catch (e) {
+      const err = sheet.querySelector('#derr');
+      err.hidden = false; err.textContent = e.message;
+      btn.disabled = false;
+      btn.textContent = withNumber ? 'Mark dispatched' : 'Dispatch without a number';
+    }
+  };
+  sheet.querySelector('#go').addEventListener('click', () => {
+    if (!sheet.querySelector('#tracking').value.trim()) {
+      const err = sheet.querySelector('#derr');
+      err.hidden = false; err.textContent = 'Add the number, or use the button below.';
+      return;
+    }
+    send(true);
+  });
+  sheet.querySelector('#skip').addEventListener('click', () => send(false));
+  document.body.append(sheet);
+}
+
+/* ------------------------------------------------------------- messages ---- */
+async function messages(refresh) {
+  const threads = await rpc('seller_threads');
+  const wrap = el('<div class="rows"></div>');
+  if (!threads.length) {
+    wrap.append(el(`
+      <div class="empty">
+        <h2>No messages</h2>
+        <p>When a buyer asks about a size or a colour, the conversation appears here.</p>
+      </div>`));
+    return wrap;
+  }
+  for (const t of threads) {
+    const row = el(`
+      <button class="row admin-row" style="text-align:left;width:100%">
+        <div class="ph mono">${esc((t.buyer_name || '?').slice(0, 2).toUpperCase())}</div>
+        <div>
+          <h3>${esc(t.buyer_name)}${t.unread ? ' <span class="unread-dot" style="display:inline-block"></span>' : ''}</h3>
+          <div class="meta"><span>${t.from === 'buyer' ? '' : 'You: '}${esc((t.preview || '').slice(0, 70))}</span></div>
+          ${t.product ? `<div class="meta addr">about ${esc(t.product)}</div>` : ''}
+        </div>
+        <div class="acts"><span style="font-size:12px;color:var(--ink-faint)">${
+          new Date(t.last_at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short' })}</span></div>
+      </button>`);
+    row.addEventListener('click', () => sellerThread(t.id, refresh));
+    wrap.append(row);
+  }
+  return wrap;
+}
+
+function sellerThread(id, refresh) {
+  const sheet = el(`
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Conversation">
+      <div class="sheet-in" style="display:flex;flex-direction:column;height:80dvh">
+        <div class="sheet-bar"><h2 id="who">Conversation</h2>
+          <button class="btn ghost" id="close" style="min-height:34px;padding:0 12px;font-size:13px">Close</button></div>
+        <div class="thread" id="thread" style="flex:1;overflow-y:auto"></div>
+        <form class="composer">
+          <textarea rows="1" placeholder="Reply…" aria-label="Your reply"></textarea>
+          <button class="btn" type="submit">Send</button>
+        </form>
+      </div>
+    </div>`);
+  const close = () => { sheet.remove(); refresh(); };
+  sheet.querySelector('#close').addEventListener('click', close);
+
+  let data = null;
+  const thread = sheet.querySelector('#thread');
+  const paint = () => {
+    sheet.querySelector('#who').textContent = data.buyer_name + (data.product ? ` · ${data.product}` : '');
+    thread.replaceChildren(...data.messages.map(m => el(`
+      <div class="bubble ${m.sender === 'seller' ? 'buyer' : 'seller'}">${esc(m.body)}
+        <span class="at">${new Date(m.at).toLocaleTimeString('en-PK', { hour: 'numeric', minute: '2-digit' })}</span>
+      </div>`)));
+    requestAnimationFrame(() => thread.scrollTo({ top: thread.scrollHeight }));
+  };
+
+  rpc('seller_thread', { p_thread: id }).then(d => { data = d; paint(); rpc('seller_read', { p_thread: id }); });
+
+  const box = sheet.querySelector('textarea');
+  box.addEventListener('input', () => { box.style.height = 'auto'; box.style.height = Math.min(120, box.scrollHeight) + 'px'; });
+  sheet.querySelector('.composer').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const body = box.value.trim();
+    if (!body) return;
+    box.value = ''; box.style.height = 'auto';
+    data.messages.push({ sender: 'seller', body, at: new Date().toISOString() });
+    paint();
+    try { data = await rpc('seller_send', { p_thread: id, p_body: body }); paint(); }
+    catch (e) { fail(e); }
+  });
+  document.body.append(sheet);
 }
 
 /* ----------------------------------------------------------------- insights */
@@ -541,6 +778,11 @@ function shop() {
           <div class="field"><label for="s-city">City you ship from</label><select id="s-city"></select></div>
           <div class="field"><label for="s-phone">Mobile number</label><input id="s-phone" type="tel" inputmode="tel" value="${esc(me.phone)}"></div>
           <div class="field"><label for="s-address">Pickup address</label><textarea id="s-address">${esc(me.address)}</textarea></div>
+          <div class="field">
+            <label for="s-dispatch">How long to hand a parcel over <span class="hint">buyers see this as part of the delivery estimate</span></label>
+            <select id="s-dispatch">${[0,1,2,3,4,5,7].map(d =>
+              `<option value="${d}"${me.dispatch_days === d ? ' selected' : ''}>${d === 0 ? 'Same day' : d + ' working day' + (d === 1 ? '' : 's')}</option>`).join('')}</select>
+          </div>
           <button class="btn block" id="s-save">Save</button>
           <div class="err" id="s-err" role="alert" hidden></div>
         </div>
@@ -569,7 +811,8 @@ function shop() {
         p_brand: wrap.querySelector('#s-brand').value.trim(),
         p_city: wrap.querySelector('#s-city').value,
         p_phone: wrap.querySelector('#s-phone').value.replace(/\D/g, ''),
-        p_address: wrap.querySelector('#s-address').value.trim()
+        p_address: wrap.querySelector('#s-address').value.trim(),
+        p_dispatch_days: Number(wrap.querySelector('#s-dispatch').value)
       });
       toast('Saved');
       render();
@@ -599,6 +842,7 @@ async function render() {
       <nav class="nav">
         <button data-tab="listings">Listings<span class="count num">${me.products}</span></button>
         <button data-tab="orders">Orders<span class="count num">${me.open_orders}</span></button>
+        <button data-tab="messages">Messages${me.unread_messages ? `<span class="count num">${me.unread_messages}</span>` : ''}</button>
         <button data-tab="insights">Insights</button>
         <button data-tab="shop">Shop</button>
       </nav>
@@ -635,6 +879,8 @@ async function render() {
     pane.append(add, await listings());
   } else if (tab === 'orders') {
     pane.append(await orders());
+  } else if (tab === 'messages') {
+    pane.append(await messages(render));
   } else if (tab === 'insights') {
     pane.append(await insights());
   } else {

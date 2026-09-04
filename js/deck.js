@@ -11,6 +11,7 @@ import { api } from './api.js';
 import { store } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
 import { burst, pop, parallax, resetParallax, ghostDeck } from './motion.js';
+import { priceHtml } from './shop.js';
 
 const THROW = 0.26;      // fraction of card width that counts as a decision
 const FLICK = 0.55;      // px/ms — a fast flick decides even if it is short
@@ -81,7 +82,7 @@ export function deckScreen({ onOpen }) {
       <article class="swipe-card${p.promoted ? ' promoted' : ''}" style="transform:${rest(depth)};z-index:${10 - depth}" data-id="${esc(p.id)}">
         <div class="photo">
           <img src="${esc(p.photos[0])}" alt="${esc(p.title)}" ${depth === 0 ? 'fetchpriority="high"' : ''} decoding="async">
-          ${p.promoted ? '<span class="promo-flag">Promoted</span>' : ''}
+          ${p.was ? '<span class="sale-flag">Sale</span>' : p.promoted ? '<span class="promo-flag">Promoted</span>' : ''}
           <div class="stamp keep">Saved</div>
           <div class="stamp pass">Pass</div>
         </div>
@@ -89,9 +90,10 @@ export function deckScreen({ onOpen }) {
           <div class="brand">${esc(p.seller.brand_name)}</div>
           <h2>${esc(p.title)}</h2>
           <div class="row">
-            <span class="price num">${money(p.price)}</span>
+            <span class="price">${priceHtml(p)}</span>
             <span class="where">${esc(p.city)} · ${esc(p.condition)}</span>
           </div>
+          ${(p.sizes || []).length ? `<div class="card-sizes">${p.sizes.map(z => `<span>${esc(z)}</span>`).join('')}</div>` : ''}
         </div>
       </article>`);
     if (depth === 0) {
