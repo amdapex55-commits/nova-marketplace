@@ -35,6 +35,8 @@ that never ships.
       js/views.js      onboarding, browse, search, product, wishlist
       js/checkout.js   bag, checkout, confirmation
       js/money.mjs     order arithmetic — pure, and covered by tests
+      seller.html      the seller workspace (separate entry point)
+      js/seller/       sb.js (tiny Supabase client) · photos.js (resize) · app.js
       data/catalog.json  demo catalogue (generated)
     supabase/
       migrations/      0001 schema · 0002 RLS · 0003 place_order
@@ -131,9 +133,37 @@ Sensitive seller data lives in `seller_contacts`, a separate table with no
 `anon` grant at all — rather than relying on column-level grants, which do not
 restrict anything on Supabase.
 
+## The seller workspace
+
+`seller.html` — sign up, register a shop, list products with photographs, and
+work the order inbox. It talks to the **real** Supabase project; the buyer app
+does not (see the seam above). The two share `css/app.css` and `js/ui.js`.
+
+**Approval is per seller, once.** A new shop lands on `pending` and can build
+listings straight away; they go live the moment the shop is approved. A queue
+that grows with every listing forever is not something one person can work.
+
+**Photographs are resized in the seller's browser** into three WebP variants
+(400 / 800 / 1600w) before anything is uploaded — a 4 MB camera photo would
+otherwise cost bandwidth twice and be shown once. One `photos` row per
+photograph, keyed without the variant suffix, under a **random** id.
+
+Photos live in Supabase Storage for now. R2 is still the plan — no egress
+charge is the only thing that makes 100k images affordable — and moving is a
+copy plus one base URL in `js/seller/storage.js`. Two things to keep in mind:
+**Storage has no cascade**, so `delete_product()` returns the object keys for
+the caller to clear; and a delete the policy refuses comes back as **200 with an
+empty array**, not an error, so `storage.remove()` counts what actually went and
+warns when it is short.
+
+**Approving a seller has no UI yet.** Until the admin panel exists:
+
+    update sellers set status = 'active' where brand_name = '…';
+
 ## Not built yet
 
-Seller workspace and the R2 upload pipeline · seller order inbox (the schema
-and policies exist; the screens do not) · buyer-facing order status ·
-moderation queue and report-a-listing · subscription billing · admin panel.
+The buyer app's read path against PostgREST · R2 instead of Supabase Storage ·
+buyer-facing order status · an admin panel for approving sellers and marking
+subscriptions paid · report-a-listing · subscription billing · a custom SMTP
+provider, without which seller signup silently fails after a few an hour.
 See the vault: `Nova OS / Nova Marketplace`.

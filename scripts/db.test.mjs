@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { RULES, priceOrder } from '../public/js/money.mjs';
 
 const run = promisify(execFile);
@@ -40,9 +41,20 @@ const fails = async (text, opts) => {
 let sellerA, sellerB, userA, userB, prodA1, prodA2, prodB1, dear;
 
 before(async () => {
-  for (const f of ['supabase/local/bootstrap.sql', 'supabase/migrations/20260903230001_init.sql',
-                   'supabase/migrations/20260903230002_rls.sql', 'supabase/migrations/20260903230003_place_order.sql']) {
-    await run('psql', ['-q', '-v', 'ON_ERROR_STOP=1', '-f', path.join(ROOT, f), DB]);
+  // Create the database here rather than expecting one to exist. The after()
+  // hook drops it, so a suite that assumed it was already there passed the
+  // first time and failed every run after — which reads exactly like the
+  // migrations broke.
+  await run('psql', ['-q', '-c', `drop database if exists ${DB} with (force)`, 'postgres']);
+  await run('psql', ['-q', '-c', `create database ${DB}`, 'postgres']);
+
+  // Read the migrations off disk in filename order rather than listing them
+  // here: a hardcoded list silently skips whatever was added last, and every
+  // test for it fails in a way that looks like the migration is broken.
+  await run('psql', ['-q', '-v', 'ON_ERROR_STOP=1', '-f', path.join(ROOT, 'supabase/local/bootstrap.sql'), DB]);
+  const dir = path.join(ROOT, 'supabase/migrations');
+  for (const f of (await fs.readdir(dir)).filter(f => f.endsWith('.sql')).sort()) {
+    await run('psql', ['-q', '-v', 'ON_ERROR_STOP=1', '-f', path.join(dir, f), DB]);
   }
 
   const rows = await sql(`
@@ -242,13 +254,194 @@ test('a seller sees only their own shipments', async () => {
   assert.equal(a + b, all, 'the two sellers between them should see every shipment exactly once');
 });
 
-test('a seller cannot reassign a shipment to another seller', async () => {
+test('a seller cannot write to shipments directly at all', async () => {
+  // This used to assert that the row-level policy let a seller mark their own
+  // parcel dispatched while blocking a reassignment. 0004 removed that grant
+  // outright, because RLS restricts rows and never columns — the same grant
+  // that allowed `status` also allowed `total`. Advancing a parcel now goes
+  // through set_shipment_status(), which is tested below.
   const [[id]] = await sql(`select s.id from shipments s where s.seller_id = '${sellerA}' limit 1;`);
-  await sql(`update shipments set status = 'dispatched' where id = '${id}';`, { role: 'authenticated', uid: userA });
-  assert.equal((await sql(`select status from shipments where id = '${id}';`))[0][0], 'dispatched',
-    'a seller may advance their own shipment');
+  assert.ok(await fails(`update shipments set status = 'dispatched' where id = '${id}';`,
+                        { role: 'authenticated', uid: userA }));
+  assert.ok(await fails(`update shipments set seller_id = '${sellerB}' where id = '${id}';`,
+                        { role: 'authenticated', uid: userA }));
+});
 
-  const err = await fails(`update shipments set seller_id = '${sellerB}' where id = '${id}';`,
+/* ------------------------------------------------- seller workspace (0004) -- */
+
+/* A signed-in user with no shop yet — register_seller() has to work for them,
+   which means auth.uid() exists but my_seller_id() is still null. */
+const NEW_USER = '11111111-2222-3333-4444-555555555555';
+
+test('a seller can create their own shop, and lands on pending', async () => {
+  const [[out]] = await sql(
+    `select register_seller('Rawal Leather','B Owner','03007778888','Shop 4, Anarkali','Lahore')::text;`,
+    { role: 'authenticated', uid: NEW_USER });
+  const me = JSON.parse(out);
+  assert.equal(me.brand_name, 'Rawal Leather');
+  assert.equal(me.status, 'pending', 'approval is per seller, once — not per listing');
+  assert.equal(me.products, 0);
+});
+
+test('a pending seller can still read their own shop', async () => {
+  // Before 0004 the only select policy was `status = 'active'`, so a pending
+  // seller opened the workspace to nothing and no explanation.
+  const [[out]] = await sql(`select me()::text;`, { role: 'authenticated', uid: NEW_USER });
+  assert.equal(JSON.parse(out).status, 'pending');
+});
+
+test('one account cannot own two shops', async () => {
+  const err = await fails(
+    `select register_seller('Second Shop','B','03007778888','x','Lahore');`,
+    { role: 'authenticated', uid: NEW_USER });
+  assert.match(err, /already has a shop/);
+});
+
+test('a seller cannot promote themselves to active', async () => {
+  // There is no UPDATE grant on sellers at all, so status is out of reach —
+  // and update_shopfront() deliberately does not accept it.
+  const err = await fails(`update sellers set status = 'active' where id = my_seller_id();`,
+                          { role: 'authenticated', uid: NEW_USER });
+  assert.ok(err, 'a seller must not be able to approve themselves');
+  const [[out]] = await sql(`select me()::text;`, { role: 'authenticated', uid: NEW_USER });
+  assert.equal(JSON.parse(out).status, 'pending');
+});
+
+test('publishing needs a photo, stock, and an approved seller', async () => {
+  const [[pid]] = await sql(
+    `insert into products (seller_id, title, price, interest, city, stock, status)
+     select id, 'Leather Belt', 2200, 'clothing', 'Lahore', 3, 'draft' from sellers where brand_name = 'Rawal Leather'
+     returning id;`);
+
+  const noPhoto = await fails(`select publish_product('${pid}', true);`, { role: 'authenticated', uid: NEW_USER });
+  assert.match(noPhoto, /at least one photo/);
+
+  await sql(`insert into photos (product_id, position, key) values ('${pid}', 0, 'x/y-card.webp');`);
+
+  // Seller still pending, so the listing waits with them rather than going live.
+  const [[pending]] = await sql(`select publish_product('${pid}', true);`, { role: 'authenticated', uid: NEW_USER });
+  assert.equal(pending, 'pending');
+
+  await sql(`update sellers set status = 'active' where brand_name = 'Rawal Leather';`);
+  const [[live]] = await sql(`select publish_product('${pid}', true);`, { role: 'authenticated', uid: NEW_USER });
+  assert.equal(live, 'live', 'once the seller is approved their listings go straight up');
+
+  const [[zero]] = await sql(`select publish_product('${pid}', false);`, { role: 'authenticated', uid: NEW_USER });
+  assert.equal(zero, 'draft');
+});
+
+test('a seller cannot publish, or unpublish, somebody else\'s listing', async () => {
+  const err = await fails(`select publish_product('${prodA1}', true);`, { role: 'authenticated', uid: NEW_USER });
+  assert.match(err, /not your listing/);
+});
+
+test('THE MONEY HOLE: a seller cannot rewrite the totals on their own shipment', async () => {
+  // 0002 granted `update on shipments` so a parcel could be marked dispatched.
+  // RLS restricts rows, never columns — so that same grant let a seller edit
+  // items_total, delivery and total AFTER the buyer had agreed to them.
+  // 0004 revokes it. If this test ever passes an update, the hole is back.
+  const [[id, before]] = await sql(
+    `select id, total from shipments where seller_id = '${sellerA}' limit 1;`);
+
+  const err = await fails(`update shipments set total = 999999 where id = '${id}';`,
                           { role: 'authenticated', uid: userA });
-  assert.ok(err, 'reassigning to another seller must be refused by the WITH CHECK');
+  assert.ok(err, 'a seller must not be able to write to shipments directly');
+  assert.match(err, /permission denied/i);
+
+  const [[after]] = await sql(`select total from shipments where id = '${id}';`);
+  assert.equal(after, before, 'the agreed total must be exactly what the buyer saw');
+});
+
+test('a seller advances their own parcel, forward only', async () => {
+  const [[id]] = await sql(`select id from shipments where seller_id = '${sellerA}' and status = 'placed' limit 1;`);
+  const [[s1]] = await sql(`select set_shipment_status('${id}', 'dispatched');`, { role: 'authenticated', uid: userA });
+  assert.equal(s1, 'dispatched');
+
+  await sql(`select set_shipment_status('${id}', 'delivered');`, { role: 'authenticated', uid: userA });
+  const closed = await fails(`select set_shipment_status('${id}', 'dispatched');`, { role: 'authenticated', uid: userA });
+  assert.match(closed, /already closed/, 'a delivered parcel cannot be walked backwards');
+
+  const bogus = await fails(`select set_shipment_status('${id}', 'placed');`, { role: 'authenticated', uid: userA });
+  assert.match(bogus, /not a status a seller can set/);
+});
+
+test('a seller cannot touch another seller\'s parcel', async () => {
+  const [[id]] = await sql(`select id from shipments where seller_id = '${sellerB}' limit 1;`);
+  const err = await fails(`select set_shipment_status('${id}', 'dispatched');`, { role: 'authenticated', uid: userA });
+  assert.match(err, /not your parcel/);
+});
+
+test('the order inbox shows the buyer\'s address — and only for own parcels', async () => {
+  // `orders` has no grant for authenticated and must never get one, or every
+  // seller reads every buyer. my_shipments() is the only way through.
+  assert.ok(await fails('select buyer_phone from orders;', { role: 'authenticated', uid: userA }),
+    'orders must stay unreachable even for a signed-in seller');
+
+  const [[out]] = await sql(`select my_shipments()::text;`, { role: 'authenticated', uid: userA });
+  const mine = JSON.parse(out);
+  assert.ok(mine.length > 0);
+  assert.ok(mine[0].buyer.phone && mine[0].buyer.address, 'a seller must be able to deliver');
+  assert.ok(mine[0].lines.length > 0);
+
+  const [[bOut]] = await sql(`select my_shipments()::text;`, { role: 'authenticated', uid: userB });
+  const theirs = JSON.parse(bOut);
+  const overlap = mine.filter(m => theirs.some(t => t.id === m.id));
+  assert.equal(overlap.length, 0, 'two sellers must never see the same parcel');
+});
+
+test('deleting a listing hands back its photo keys, because Storage has no cascade', async () => {
+  const [[pid]] = await sql(
+    `insert into products (seller_id, title, price, interest, city, stock, status)
+     select id, 'Throwaway', 500, 'clothing', 'Lahore', 1, 'draft' from sellers where brand_name = 'Rawal Leather'
+     returning id;`);
+  await sql(`insert into photos (product_id, position, key) values ('${pid}', 0, 'a/one.webp'), ('${pid}', 1, 'a/two.webp');`);
+
+  const [[out]] = await sql(`select delete_product('${pid}')::text;`, { role: 'authenticated', uid: NEW_USER });
+  const keys = JSON.parse(out);
+  assert.deepEqual(keys.sort(), ['a/one.webp', 'a/two.webp'],
+    'the caller needs these to clear the objects itself — deleting the row will not');
+  assert.equal((await sql(`select count(*) from products where id = '${pid}';`))[0][0], '0');
+});
+
+test('a listing that has been ordered cannot be deleted', async () => {
+  const [[pid]] = await sql(`select product_id from shipment_lines limit 1;`);
+  const [[owner]] = await sql(`select user_id from seller_contacts c
+    join products p on p.seller_id = c.seller_id where p.id = '${pid}';`);
+  const err = await fails(`select delete_product('${pid}');`, { role: 'authenticated', uid: owner });
+  assert.match(err, /has been ordered/, 'an order must keep referring to something');
+});
+
+/* -------------------------------------------------------- storage policies -- */
+
+test('a seller can only write photos into their own folder', async () => {
+  const [[mine]] = await sql(`select my_seller_id();`, { role: 'authenticated', uid: userA });
+  const [[theirs]] = await sql(`select my_seller_id();`, { role: 'authenticated', uid: userB });
+
+  const ok = await fails(
+    `insert into storage.objects (bucket_id, name) values ('product-photos', '${mine}/p1/abc-card.webp');`,
+    { role: 'authenticated', uid: userA });
+  assert.equal(ok, null, 'a seller must be able to write into their own folder');
+
+  const hijack = await fails(
+    `insert into storage.objects (bucket_id, name) values ('product-photos', '${theirs}/p1/evil-card.webp');`,
+    { role: 'authenticated', uid: userA });
+  assert.ok(hijack, "writing into another seller's folder must be refused");
+  assert.match(hijack, /row-level security/i);
+});
+
+test('a seller cannot delete another seller\'s photos', async () => {
+  const [[theirs]] = await sql(`select my_seller_id();`, { role: 'authenticated', uid: userB });
+  await sql(`insert into storage.objects (bucket_id, name) values ('product-photos', '${theirs}/p9/keep-card.webp');`);
+
+  // The live Storage API answers a refused delete with 200 and an empty list,
+  // not an error — so the only honest check is whether the row survived.
+  await sql(`delete from storage.objects where name = '${theirs}/p9/keep-card.webp';`,
+            { role: 'authenticated', uid: userA });
+  const [[left]] = await sql(`select count(*) from storage.objects where name = '${theirs}/p9/keep-card.webp';`);
+  assert.equal(left, '1', "another seller's file must still be there");
+});
+
+test('product photos are readable by anyone — it is a shopfront', async () => {
+  const rows = await sql(`select count(*) from storage.objects where bucket_id = 'product-photos';`, { role: 'anon' });
+  assert.ok(Number(rows[0][0]) > 0);
 });

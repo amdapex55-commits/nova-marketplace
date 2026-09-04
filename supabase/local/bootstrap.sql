@@ -38,3 +38,31 @@ grant all on all functions in schema public to anon, authenticated;
 alter default privileges in schema public grant all on tables    to anon, authenticated;
 alter default privileges in schema public grant all on sequences to anon, authenticated;
 alter default privileges in schema public grant all on functions to anon, authenticated;
+
+-- ---------------------------------------------------------------- storage ---
+-- Enough of Supabase Storage to let 20260904070002_storage.sql apply and its
+-- policies be exercised. Only the pieces the policies actually touch:
+-- storage.objects, and foldername(), which returns the path segments WITHOUT
+-- the filename — that is what makes `(storage.foldername(name))[1]` the owning
+-- seller's id.
+create schema if not exists storage;
+
+create table if not exists storage.objects (
+  id        uuid primary key default gen_random_uuid(),
+  bucket_id text not null,
+  name      text not null,
+  owner     uuid,
+  metadata  jsonb default '{}'::jsonb
+);
+
+create or replace function storage.foldername(name text) returns text[]
+  language sql immutable as $$
+  select (string_to_array(name, '/'))[1:cardinality(string_to_array(name, '/')) - 1]
+$$;
+
+alter table storage.objects enable row level security;
+grant usage on schema storage to anon, authenticated;
+-- Permissive to start with, exactly like the public schema above, so the
+-- policies have to be what actually restricts anything.
+grant all on storage.objects to anon, authenticated;
+grant execute on function storage.foldername(text) to anon, authenticated;

@@ -11,7 +11,7 @@
     "seed": "node scripts/seed.mjs",
     "test": "node --test scripts/money.test.mjs",
     "deploy": "npx wrangler deploy",
-    "test:db": "createdb nova_marketplace_dev 2>/dev/null; node --test scripts/db.test.mjs",
+    "test:db": "node --test scripts/db.test.mjs",
     "icons": "python3 scripts/make-icons.py",
     "check": "npm test && npm run test:db"
   }

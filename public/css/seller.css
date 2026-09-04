@@ -1,0 +1,107 @@
+/* Seller workspace. Sits on top of css/app.css and only adds what the buyer app
+   has no use for. Same palette, wider frame: a seller is usually at a desk with
+   a spreadsheet open, while a buyer is one-handed on a phone. */
+
+body.seller #app { max-width: 780px; }
+
+.boot { display: grid; place-items: center; gap: 12px; min-height: 60dvh; color: var(--ink-faint); }
+.spinner {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2.5px solid var(--rule); border-top-color: var(--emerald);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; border-bottom: 1px solid var(--rule); background: var(--card);
+}
+.bar .mark { font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -.03em; }
+.bar .mark em { font-style: normal; color: var(--marigold); }
+.bar .who { margin-left: auto; text-align: right; line-height: 1.25; }
+.bar .who b { display: block; font-size: 14px; font-weight: 600; }
+.bar .who span { font-size: 12px; color: var(--ink-faint); }
+
+.state {
+  display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; padding: 3px 8px; border-radius: 5px; white-space: nowrap;
+}
+.state.pending    { background: var(--marigold-soft); color: #6b4a02; }
+.state.active,
+.state.live       { background: var(--emerald-soft); color: var(--emerald-dark); }
+.state.draft      { background: var(--sunken); color: var(--ink-faint); }
+.state.sold       { background: var(--danger-soft); color: var(--danger); }
+.state.suspended  { background: var(--danger-soft); color: var(--danger); }
+.state.placed     { background: var(--marigold-soft); color: #6b4a02; }
+.state.confirmed  { background: var(--sunken); color: var(--ink); }
+.state.dispatched { background: var(--emerald-soft); color: var(--emerald-dark); }
+.state.delivered  { background: var(--emerald); color: #fff; }
+.state.refused    { background: var(--danger-soft); color: var(--danger); }
+
+.nav { display: flex; gap: 4px; padding: 10px 12px 0; border-bottom: 1px solid var(--rule); background: var(--card); }
+.nav button {
+  padding: 10px 14px 12px; font-size: 14.5px; font-weight: 600; color: var(--ink-faint);
+  border-bottom: 2.5px solid transparent; margin-bottom: -1px;
+}
+.nav button[aria-current="page"] { color: var(--emerald); border-bottom-color: var(--emerald); }
+.nav .count { font-size: 11px; background: var(--sunken); padding: 1px 6px; border-radius: 8px; margin-left: 5px; }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden; margin: 14px; }
+.stats div { background: var(--card); padding: 12px 14px; }
+.stats dt { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; margin: 0; }
+.stats dd { margin: 4px 0 0; font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700; font-size: 22px; }
+
+.rows { display: flex; flex-direction: column; }
+.row {
+  display: grid; grid-template-columns: 64px 1fr auto; gap: 13px; align-items: start;
+  padding: 14px 15px; border-bottom: 1px solid var(--rule-soft);
+}
+.row:last-child { border-bottom: 0; }
+.row .ph { width: 64px; aspect-ratio: 4/5; border-radius: 8px; overflow: hidden; background: var(--sunken); display: grid; place-items: center; color: var(--ink-faint); font-size: 10.5px; text-align: center; }
+.row .ph img { width: 100%; height: 100%; object-fit: cover; }
+.row h3 { font-size: 15.5px; font-weight: 600; line-height: 1.25; margin: 0; }
+.row .meta { font-size: 12.5px; color: var(--ink-faint); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row .acts { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.row .acts button { font-size: 13px; font-weight: 600; color: var(--emerald); }
+.row .acts button.warn { color: var(--danger); }
+
+.thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+.thumb { position: relative; width: 74px; aspect-ratio: 4/5; border-radius: 8px; overflow: hidden; background: var(--sunken); border: 1px solid var(--rule); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.thumb button {
+  position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(22,26,24,.72); color: #fff; font-size: 13px; line-height: 1; display: grid; place-items: center;
+}
+.thumb .badge { position: absolute; bottom: 3px; left: 3px; font-size: 9.5px; background: rgba(22,26,24,.72); color: #fff; padding: 1px 5px; border-radius: 4px; }
+.picker {
+  display: grid; place-items: center; gap: 4px; width: 74px; aspect-ratio: 4/5;
+  border: 1.5px dashed var(--rule); border-radius: 8px; color: var(--ink-faint); font-size: 11px; text-align: center;
+}
+.picker:hover { border-color: var(--emerald); color: var(--emerald); }
+
+.parcel { border-bottom: 1px solid var(--rule-soft); padding: 15px; }
+.parcel:last-child { border-bottom: 0; }
+.parcel .hd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.parcel .hd b { font-family: "Familjen Grotesk", system-ui, sans-serif; font-size: 16px; letter-spacing: .03em; }
+.parcel .hd .when { font-size: 12.5px; color: var(--ink-faint); margin-left: auto; }
+.parcel ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.parcel li { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--ink-soft); }
+.parcel .to {
+  margin-top: 11px; padding: 11px 13px; background: var(--paper);
+  border: 1px solid var(--rule-soft); border-radius: 10px; font-size: 14px; line-height: 1.5;
+}
+.parcel .to b { font-weight: 600; }
+.parcel .to a { color: var(--emerald); font-weight: 600; }
+.parcel .acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.parcel .acts .btn { min-height: 38px; padding: 0 14px; font-size: 14px; }
+
+.sheet {
+  position: fixed; inset: 0; z-index: 60; background: rgba(22,26,24,.42);
+  display: grid; place-items: end center; padding: 0;
+}
+.sheet-in {
+  background: var(--paper); width: 100%; max-width: 780px; max-height: 92dvh;
+  border-radius: 18px 18px 0 0; overflow-y: auto; padding-bottom: 20px;
+}
+.sheet-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 15px 16px; background: var(--paper); border-bottom: 1px solid var(--rule); }
+.sheet-bar h2 { font-size: 18px; flex: 1; }
