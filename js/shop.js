@@ -9,6 +9,7 @@ import { api } from './api.js';
 import { store } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
 import { burst, pop } from './motion.js';
+import { account } from './account.js';
 
 const STAR = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1Z"/></svg>';
 
@@ -349,3 +350,79 @@ export async function reviewList(productId) {
   }
   return wrap;
 }
+
+/* ---------------------------------------------------------------- account -- */
+/* The buyer's own page: who they are, every order they have placed, and the way
+   out. This is what the account is FOR — before it, a returning buyer had to
+   remember a code and a phone number to find an order. */
+export async function accountScreen({ onOrder, onSignedOut }) {
+  const me = await api.meBuyer();
+  if (!me) {
+    return el(`
+      <div class="screen"><div class="empty">
+        <h2>No account yet</h2>
+        <p>Fill a bag and check out — we make the account then, from what the order needs anyway.</p>
+      </div></div>`);
+  }
+
+  const orders = await api.myOrders();
+  const root = el(`
+    <div class="screen">
+      <div class="scroll">
+        <div class="shop-hero">
+          <div class="shop-avatar">${esc(initials(me.name))}</div>
+          <h1>${esc(me.name)}</h1>
+          <div class="sub">${esc(me.email)} · ${esc(me.phone)}</div>
+          <div class="shop-facts">
+            <div><b>${orders.length}</b><span>order${orders.length === 1 ? '' : 's'}</span></div>
+            <div><b>${new Date(me.since).toLocaleDateString('en-PK', { month: 'short', year: 'numeric' })}</b><span>joined</span></div>
+          </div>
+        </div>
+        <div id="orders"></div>
+        <div class="pad" style="padding:16px 14px 26px">
+          <button class="btn ghost block" id="out">Sign out</button>
+        </div>
+      </div>
+    </div>`);
+
+  const STATUS = { 1: ['Placed', 'placed'], 2: ['Confirmed', 'confirmed'],
+                   3: ['On its way', 'dispatched'], 4: ['Delivered', 'delivered'],
+                   5: ['Cancelled', 'refused'] };
+  const box = root.querySelector('#orders');
+
+  if (!orders.length) {
+    box.append(el('<div class="empty"><h2>Nothing ordered yet</h2><p>Your orders will live here.</p></div>'));
+  } else {
+    const list = el('<div class="group"><header><h2>Your orders</h2></header></div>');
+    for (const o of orders) {
+      const [label, cls] = STATUS[o.status] || STATUS[1];
+      const row = el(`
+        <button class="line" style="grid-template-columns:56px 1fr auto;text-align:left;width:100%">
+          <div class="ph">${o.cover
+            ? `<img src="${esc(storage(o.cover))}" alt="" loading="lazy">`
+            : ''}</div>
+          <div>
+            <h3>${esc(o.code)} <span class="state ${cls}">${label}</span></h3>
+            <div class="sub">${esc((o.sellers || []).join(', '))}</div>
+            <div class="sub" style="color:var(--ink-faint)">${
+              new Date(o.placed_at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })
+            } · ${o.units} item${o.units === 1 ? '' : 's'} · ${o.parcels} parcel${o.parcels === 1 ? '' : 's'}</div>
+          </div>
+          <div class="price num">${money(o.total)}</div>
+        </button>`);
+      row.addEventListener('click', () => onOrder(o.code));
+      list.append(row);
+    }
+    box.append(list);
+  }
+
+  root.querySelector('#out').addEventListener('click', async () => {
+    if (!confirm('Sign out? Your bag and saved items stay on this device.')) return;
+    await account.signOut();
+    onSignedOut();
+  });
+  return root;
+}
+
+const storage = key =>
+  `${window.NOVAMKT.SUPABASE_URL}/storage/v1/object/public/product-photos/${key}-thumb.webp`;

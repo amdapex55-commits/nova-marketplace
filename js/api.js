@@ -10,22 +10,31 @@
  * needs the project long before the buyer app is ready for it.
  */
 import { store, isLiveId } from './store.js';
+import { account } from './account.js';
 
 const cfg = () => window.NOVAMKT;
 const live = () => cfg().BUYER_BACKEND === 'live' && !!cfg().SUPABASE_URL;
 
 /* ------------------------------------------------------------------ live --- */
 
-async function rpc(name, args = {}) {
+async function rpc(name, args = {}, retry = true) {
   const res = await fetch(new URL(`/rest/v1/rpc/${name}`, cfg().SUPABASE_URL), {
     method: 'POST',
     headers: {
       apikey: cfg().SUPABASE_ANON_KEY,
-      authorization: `Bearer ${cfg().SUPABASE_ANON_KEY}`,
+      // A signed-in buyer's token when there is one, so auth.uid() is set and
+      // place_order stamps the order with the account. Anonymous browsing keeps
+      // using the publishable key, unchanged.
+      authorization: `Bearer ${account.token || cfg().SUPABASE_ANON_KEY}`,
       'content-type': 'application/json'
     },
     body: JSON.stringify(args)
   });
+  // Access tokens last an hour; refresh once rather than logging someone out
+  // in the middle of a checkout.
+  if (res.status === 401 && retry && account.signedIn) {
+    try { await account.refresh(); return rpc(name, args, false); } catch { /* fall through */ }
+  }
   if (!res.ok) {
     const body = await res.text();
     let message = `${name} failed`;
@@ -34,7 +43,12 @@ async function rpc(name, args = {}) {
     err.status = res.status;
     throw err;
   }
-  return res.json();
+  // Some of these return void — buyer_read and seller_read mark a thread read
+  // and answer 204 with no body. res.json() throws on an empty response, so
+  // read the text and only parse when there is something to parse.
+  const text = await res.text();
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return null; }
 }
 
 /* Photographs are stored as object keys, not URLs, so that moving the bucket to
@@ -199,6 +213,30 @@ export const api = {
     return ids.map(id => c.byId.get(id)).filter(Boolean).map(p => hydrate(c, p));
   },
 
+  /* The account. */
+  async registerBuyer(name, email, phone) {
+    account.profile = await rpc('register_buyer', { p_name: name, p_email: email, p_phone: phone });
+    return account.profile;
+  },
+  async meBuyer() {
+    if (!account.signedIn) return null;
+    account.profile = await rpc('me_buyer');
+    return account.profile;
+  },
+  async myOrders() {
+    if (!account.signedIn) return [];
+    return rpc('my_orders');
+  },
+  async myOrder(code) {
+    if (!account.signedIn) return null;
+    return rpc('my_order', { p_code: code });
+  },
+
+  async trending() {
+    if (!live()) return [];
+    return (await rpc('trending', { p_limit: 40 })).items.map(fromLive);
+  },
+
   async offers() {
     if (live()) return (await rpc('offers', { p_limit: 60 })).items.map(fromLive);
     // Fixtures have no sale prices; the tab is honest about being empty.
@@ -299,8 +337,15 @@ export const api = {
      shoulder-surfed code on its own must reveal nothing. */
   async order(code, phone = null) {
     if (live()) {
-      try { return await rpc('get_order', { p_code: code, p_phone: phone }); }
-      catch { return null; }
+      try {
+        // Signed in, the account is a stronger claim than a phone number, so
+        // the code alone is enough for an order that belongs to them.
+        if (account.signedIn) {
+          const mine = await rpc('my_order', { p_code: code });
+          if (mine) return mine;
+        }
+        return await rpc('get_order', { p_code: code, p_phone: phone });
+      } catch { return null; }
     }
     const all = JSON.parse(localStorage.getItem('nova.orders.v1') || '{}');
     const found = all[String(code || '').trim().toUpperCase()] || null;

@@ -18,11 +18,23 @@ const FLICK = 0.55;      // px/ms — a fast flick decides even if it is short
 const PRELOAD = 8;
 
 export function deckScreen({ onOpen }) {
+  /* Three decks, one gesture.
+     They are separate queues rather than a filter on one, because switching
+     back should land you where you left off rather than at the top of a
+     reshuffled pile. */
+  const FEEDS = [
+    { id: 'you', label: 'For you', empty: 'You have seen everything that matches you.' },
+    { id: 'offers', label: 'Offers', empty: 'No sales running right now.' },
+    { id: 'trending', label: 'Trending', empty: 'Nothing is moving yet — be the first.' }
+  ];
+  let feed = 'you';
+
   const root = el(`
     <div class="screen">
       <div class="deck-wrap">
+        <div class="capsules" role="tablist" aria-label="What to swipe"></div>
         <div class="deck-head">
-          <h1 class="display">For you</h1>
+          <h1 class="display" id="deck-title">For you</h1>
           <span class="count" id="deck-count"></span>
         </div>
         <div class="deck" id="deck"></div>
@@ -38,35 +50,51 @@ export function deckScreen({ onOpen }) {
   const countEl = root.querySelector('#deck-count');
   const undoBtn = root.querySelector('#undo');
 
-  let queue = [];          // upcoming products, index 0 on top
-  let history = [];        // { product, direction } most recent last
-  let offset = 0;
-  let remaining = 0;
+  // One of these per capsule, so switching keeps your place in each.
+  const decks = Object.fromEntries(FEEDS.map(f =>
+    [f.id, { queue: [], history: [], offset: 0, remaining: 0, loaded: false }]));
   let loading = false;
   let busy = false;        // a card is mid-flight
+
+  const D = () => decks[feed];
 
   /* ---------- data ---------- */
 
   async function fill() {
     if (loading) return;
     loading = true;
+    const d = D();
+    const forFeed = feed;
     try {
-      const page = await api.deck({ offset });
+      let items = [], remaining = 0;
+      if (forFeed === 'you') {
+        const page = await api.deck({ offset: d.offset });
+        items = page.items; remaining = page.remaining;
+      } else if (forFeed === 'offers') {
+        items = d.loaded ? [] : await api.offers();
+      } else {
+        items = d.loaded ? [] : await api.trending();
+      }
+      d.loaded = true;
+
       // The ledger is written when a card is decided, but a page is requested
       // before that, so filter again here — otherwise a fast swiper can be
-      // handed a card they just dismissed.
-      const fresh = page.items.filter(p => !store.hasSeen(p.id) && !queue.some(q => q.id === p.id));
-      queue.push(...fresh);
-      offset += page.items.length;
-      remaining = page.remaining;
+      // handed a card they just dismissed. Offers and Trending are short lists
+      // people come back to, so being seen does not remove them from those.
+      const fresh = forFeed === 'you'
+        ? items.filter(p => !store.hasSeen(p.id) && !d.queue.some(q => q.id === p.id))
+        : items.filter(p => !d.queue.some(q => q.id === p.id));
+      d.queue.push(...fresh);
+      d.offset += items.length;
+      d.remaining = remaining;
     } finally {
       loading = false;
     }
-    render();
+    if (forFeed === feed) render();
   }
 
   const preload = () => {
-    for (const p of queue.slice(1, 1 + PRELOAD)) {
+    for (const p of D().queue.slice(1, 1 + PRELOAD)) {
       if (p._pre) continue;
       p._pre = true;
       const img = new Image();
@@ -117,27 +145,31 @@ export function deckScreen({ onOpen }) {
 
     // Waiting on a page rather than out of products: show skeletons instead of
     // the end-of-deck screen, or a slow network reads as "you've seen it all".
-    if (!queue.length && (loading || remaining > 0)) {
+    if (!D().queue.length && (loading || D().remaining > 0)) {
       deck.append(ghostDeck());
       countEl.textContent = '';
       return;
     }
 
-    if (!queue.length) {
+    if (!D().queue.length) {
+      const meta = FEEDS.find(f => f.id === feed);
       deck.append(el(`
         <div class="deck-empty">
           <h2>That's everything, for now</h2>
-          <p>You have seen every listing that matches you. New products arrive daily — or browse the full catalogue.</p>
-          <button class="btn quiet" id="reset-seen">Start the deck again</button>
+          <p>${esc(meta.empty)}${feed === 'you' ? ' New products arrive daily.' : ''}</p>
+          ${feed === 'you' ? '<button class="btn quiet" id="reset-seen">Start the deck again</button>' : ''}
         </div>`));
-      deck.querySelector('#reset-seen').addEventListener('click', () => {
-        store.resetSeen(); queue = []; history = []; offset = 0; fill();
+      deck.querySelector('#reset-seen')?.addEventListener('click', () => {
+        store.resetSeen();
+        Object.values(decks).forEach(d => { d.queue = []; d.history = []; d.offset = 0; d.loaded = false; });
+        fill();
       });
       countEl.textContent = '';
       return;
     }
     // Back to front, so the top card is the last child and needs no z-index war.
-    for (let d = Math.min(2, queue.length - 1); d >= 0; d--) deck.append(card(queue[d], d));
+    const q = D().queue;
+    for (let d = Math.min(2, q.length - 1); d >= 0; d--) deck.append(card(q[d], d));
 
     // Once, on the first deck of the session — a card that re-enters on every
     // render reads as a bug rather than a flourish.
@@ -147,8 +179,9 @@ export function deckScreen({ onOpen }) {
       setTimeout(() => deck.classList.remove('first-reveal'), 700);
     }
 
-    countEl.textContent = `${queue.length + remaining} left`;
-    api.track('impression', queue[0].id);
+    countEl.textContent = `${D().queue.length + D().remaining} left`;
+    api.track('impression', q[0].id);
+    maybeCoach();
     preload();
   }
 
@@ -168,30 +201,51 @@ export function deckScreen({ onOpen }) {
       node.setPointerCapture(id);
     };
 
+    /* One transform per animation frame, never per pointer event.
+       A finger produces far more pointermove events than the screen has frames,
+       and writing a transform for each one is work the compositor throws away —
+       it is what made the drag feel busy rather than smooth. */
+    let frame = 0, pending = null;
+    const apply = () => {
+      frame = 0;
+      if (!pending) return;
+      const { x, y } = pending;
+      const t = x / node.offsetWidth;
+      // Vertical movement is damped and capped: a swipe is a horizontal
+      // decision, and letting the card wander up and down makes it feel loose.
+      const lift = Math.max(-46, Math.min(46, y * 0.28));
+      // Rotation eases off at the extremes rather than growing without limit,
+      // so a long drag looks intentional instead of spun.
+      const turn = Math.tanh(t * 1.6) * 13;
+      node.style.transform =
+        `translate3d(${x.toFixed(1)}px, ${lift.toFixed(1)}px, 0) rotate(${turn.toFixed(2)}deg)`;
+      parallax(deck, t / THROW);
+      keep.style.opacity = Math.max(0, Math.min(1, t / THROW));
+      pass.style.opacity = Math.max(0, Math.min(1, -t / THROW));
+    };
+
     const move = ev => {
       if (!dragging || ev.pointerId !== id) return;
       dx = ev.clientX - startX;
       dy = ev.clientY - startY;
       if (Math.abs(dx) > 4 || Math.abs(dy) > 4) node._dragged = true;
-      const t = dx / node.offsetWidth;
-      node.style.transform = `translate3d(${dx}px, ${dy * 0.35}px, 0) rotate(${t * 11}deg)`;
-      // The card behind leans forward as this one leaves, so the deck reads as
-      // a stack of things rather than a stack of pictures.
-      parallax(deck, t / THROW);
-      // The stamps are the tutorial: the meaning of the gesture appears as the
-      // gesture is made, so no first-run overlay is needed.
-      keep.style.opacity = Math.max(0, Math.min(1, t / THROW));
-      pass.style.opacity = Math.max(0, Math.min(1, -t / THROW));
+      pending = { x: dx, y: dy };
+      if (!frame) frame = requestAnimationFrame(apply);
     };
 
     const up = ev => {
       if (!dragging || ev.pointerId !== id) return;
       dragging = false;
       node.releasePointerCapture(id);
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
       const t = dx / node.offsetWidth;
       const v = Math.abs(dx) / Math.max(1, performance.now() - startT);
-      if (Math.abs(t) > THROW || (v > FLICK && Math.abs(dx) > 30)) fly(node, product, dx > 0 ? 1 : -1);
-      else {
+      if (Math.abs(t) > THROW || (v > FLICK && Math.abs(dx) > 30)) {
+        // Carry the flick's speed into the exit so a hard throw leaves faster
+        // than a slow drag does. That single detail is most of what makes it
+        // feel like an object rather than an animation.
+        fly(node, product, dx > 0 ? 1 : -1, v);
+      } else {
         node.classList.add('settling');
         node.style.transform = rest(0);
         keep.style.opacity = pass.style.opacity = 0;
@@ -208,30 +262,35 @@ export function deckScreen({ onOpen }) {
 
   /* ---------- decisions ---------- */
 
-  function fly(node, product, dir) {
+  function fly(node, product, dir, velocity = 0) {
     if (busy || !node?.classList.contains('swipe-card') || !product) return;
     busy = true;
-    node.classList.add('settling');
-    node.style.transform = `translate3d(${dir * (innerWidth + 220)}px, -40px, 0) rotate(${dir * 22}deg)`;
+    // A fast flick leaves in ~170ms, a deliberate push in ~300ms.
+    const ms = Math.round(Math.max(170, Math.min(300, 300 - velocity * 140)));
+    node.style.transition = `transform ${ms}ms cubic-bezier(.32,.72,.28,1), opacity ${ms}ms ease`;
+    node.style.transform = `translate3d(${dir * (innerWidth + 240)}px, -50px, 0) rotate(${dir * 24}deg)`;
     node.style.opacity = '0';
     node.querySelector(dir > 0 ? '.stamp.keep' : '.stamp.pass').style.opacity = '1';
-    setTimeout(() => { commit(product, dir); busy = false; }, 230);
+    setTimeout(() => { commit(product, dir); busy = false; }, ms - 40);
   }
 
   function commit(product, dir) {
-    queue = queue.filter(p => p.id !== product.id);
+    const d = D();
+    d.queue = d.queue.filter(p => p.id !== product.id);
     store.markSeen(product.id);
-    history.push({ product, dir, wished: false });
+    d.history.push({ product, dir, wished: false });
     let saved = false;
     if (dir > 0 && !store.wished(product.id)) {
       store.toggleWish(product.id);
-      history.at(-1).wished = true;
+      d.history.at(-1).wished = true;
       saved = true;
       toast('Saved to your wishlist');
     }
+    if (!store.get().swiped_once) store.markSwiped();
+    root.dispatchEvent(new CustomEvent('deck:decided'));
     api.track(dir > 0 ? 'keep' : 'pass', product.id);
     undoBtn.disabled = false;
-    if (queue.length <= 10 && remaining > 0) fill();
+    if (d.queue.length <= 10 && d.remaining > 0) fill();
     render();
 
     // After render(), not before: render() calls deck.replaceChildren(), which
@@ -248,19 +307,19 @@ export function deckScreen({ onOpen }) {
     // Pressing pass or save then reached fly(), which looks for a `.stamp` that
     // does not exist and crashed on null. Ask for a real card.
     const top = deck.querySelector('.swipe-card:last-of-type');
-    if (!top || !queue.length || busy) return;
-    fly(top, queue[0], dir);
+    if (!top || !D().queue.length || busy) return;
+    fly(top, D().queue[0], dir);
   }
 
   function undo() {
-    const last = history.pop();
+    const last = D().history.pop();
     if (!last) return;
     store.unsee(last.product.id);
     // Only unwish what the swipe itself added — a product the buyer had already
     // saved from the grid must survive an undo here.
     if (last.wished) store.toggleWish(last.product.id);
-    queue.unshift(last.product);
-    undoBtn.disabled = history.length === 0;
+    D().queue.unshift(last.product);
+    undoBtn.disabled = D().history.length === 0;
     render();
   }
 
@@ -282,6 +341,56 @@ export function deckScreen({ onOpen }) {
   // after it — without awaiting — paints the ghost cards for exactly as long as
   // the first page takes. Awaiting here instead meant the deck simply appeared,
   // and a slow connection showed an empty frame with no explanation.
+  /* The capsules. Switching is instant on a deck already loaded, because each
+     keeps its own queue — going back to "For you" lands where you left off. */
+  const caps = root.querySelector('.capsules');
+  const drawCapsules = () => {
+    caps.replaceChildren(...FEEDS.map(f => {
+      const b = el(`<button class="capsule" role="tab" aria-selected="${f.id === feed}">${esc(f.label)}</button>`);
+      b.addEventListener('click', () => {
+        if (feed === f.id) return;
+        feed = f.id;
+        root.querySelector('#deck-title').textContent = f.label;
+        drawCapsules();
+        deck.classList.add('feed-swap');
+        setTimeout(() => deck.classList.remove('feed-swap'), 420);
+        undoBtn.disabled = D().history.length === 0;
+        if (!D().loaded) { render(); fill(); } else render();
+      });
+      return b;
+    }));
+  };
+  drawCapsules();
+
+  /* Shown once, over the first card, until the first swipe. A deck nobody
+     realises is swipeable is a grid with one item in it.
+
+     Called from render(), not once at construction: render() replaces the
+     deck's children whenever a page arrives, so a coach appended beforehand was
+     wiped a moment later and never seen. */
+  function maybeCoach() {
+    if (store.get().swiped_once || deck.querySelector('.coach')) return;
+    const coach = el(`
+      <div class="coach" aria-hidden="true">
+        <div class="coach-hand"></div>
+        <div class="coach-words">
+          <b>Swipe to decide</b>
+          <span><i class="l"></i> not for me &nbsp;·&nbsp; save it <i class="r"></i></span>
+        </div>
+      </div>`);
+    deck.append(coach);
+    const clear = () => {
+      if (!coach.isConnected) return;
+      coach.classList.add('gone');
+      setTimeout(() => coach.remove(), 320);
+    };
+    // No timer. It goes when they touch the card or make a decision — a hint
+    // that disappears on its own after six seconds is one the person who needed
+    // it most never finished reading.
+    root.addEventListener('deck:decided', clear, { once: true });
+    deck.addEventListener('pointerdown', clear, { once: true });
+  }
+
   fill();
   render();
   return root;

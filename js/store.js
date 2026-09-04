@@ -40,6 +40,7 @@ const blank = () => ({
   gender: null,          // 'women' | 'men' | 'everything' | null (skipped)
   interests: [],         // ids from catalog.interests
   onboarded: false,
+  swiped_once: false,
   seen: [],              // product ids already shown in the deck
   wishlist: [],          // product ids, most recent first
   bag: [],               // { id, qty }
@@ -106,6 +107,8 @@ export const store = {
     state.onboarded = true;
     commit();
   },
+
+  markSwiped() { state.swiped_once = true; commit(); },
 
   /* --- seen ledger: without this, a returning buyer swipes the same products
      forever and the deck feels broken. Oldest ids fall off the front. --- */
