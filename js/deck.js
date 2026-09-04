@@ -10,6 +10,7 @@
 import { api } from './api.js';
 import { store } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
+import { burst, pop, parallax, resetParallax, ghostDeck } from './motion.js';
 
 const THROW = 0.26;      // fraction of card width that counts as a decision
 const FLICK = 0.55;      // px/ms — a fast flick decides even if it is short
@@ -77,9 +78,10 @@ export function deckScreen({ onOpen }) {
 
   function card(p, depth) {
     const node = el(`
-      <article class="swipe-card" style="transform:${rest(depth)};z-index:${10 - depth}" data-id="${esc(p.id)}">
+      <article class="swipe-card${p.promoted ? ' promoted' : ''}" style="transform:${rest(depth)};z-index:${10 - depth}" data-id="${esc(p.id)}">
         <div class="photo">
           <img src="${esc(p.photos[0])}" alt="${esc(p.title)}" ${depth === 0 ? 'fetchpriority="high"' : ''} decoding="async">
+          ${p.promoted ? '<span class="promo-flag">Promoted</span>' : ''}
           <div class="stamp keep">Saved</div>
           <div class="stamp pass">Pass</div>
         </div>
@@ -106,8 +108,19 @@ export function deckScreen({ onOpen }) {
 
   const rest = depth => `translate3d(0,${depth * 9}px,0) scale(${1 - depth * 0.035})`;
 
+  let revealed = false;
+
   function render() {
     deck.replaceChildren();
+
+    // Waiting on a page rather than out of products: show skeletons instead of
+    // the end-of-deck screen, or a slow network reads as "you've seen it all".
+    if (!queue.length && (loading || remaining > 0)) {
+      deck.append(ghostDeck());
+      countEl.textContent = '';
+      return;
+    }
+
     if (!queue.length) {
       deck.append(el(`
         <div class="deck-empty">
@@ -123,6 +136,15 @@ export function deckScreen({ onOpen }) {
     }
     // Back to front, so the top card is the last child and needs no z-index war.
     for (let d = Math.min(2, queue.length - 1); d >= 0; d--) deck.append(card(queue[d], d));
+
+    // Once, on the first deck of the session — a card that re-enters on every
+    // render reads as a bug rather than a flourish.
+    if (!revealed) {
+      revealed = true;
+      deck.classList.add('first-reveal');
+      setTimeout(() => deck.classList.remove('first-reveal'), 700);
+    }
+
     countEl.textContent = `${queue.length + remaining} left`;
     api.track('impression', queue[0].id);
     preload();
@@ -151,6 +173,9 @@ export function deckScreen({ onOpen }) {
       if (Math.abs(dx) > 4 || Math.abs(dy) > 4) node._dragged = true;
       const t = dx / node.offsetWidth;
       node.style.transform = `translate3d(${dx}px, ${dy * 0.35}px, 0) rotate(${t * 11}deg)`;
+      // The card behind leans forward as this one leaves, so the deck reads as
+      // a stack of things rather than a stack of pictures.
+      parallax(deck, t / THROW);
       // The stamps are the tutorial: the meaning of the gesture appears as the
       // gesture is made, so no first-run overlay is needed.
       keep.style.opacity = Math.max(0, Math.min(1, t / THROW));
@@ -168,6 +193,7 @@ export function deckScreen({ onOpen }) {
         node.classList.add('settling');
         node.style.transform = rest(0);
         keep.style.opacity = pass.style.opacity = 0;
+        resetParallax(deck);
       }
       dx = dy = 0;
     };
@@ -194,15 +220,24 @@ export function deckScreen({ onOpen }) {
     queue = queue.filter(p => p.id !== product.id);
     store.markSeen(product.id);
     history.push({ product, dir, wished: false });
+    let saved = false;
     if (dir > 0 && !store.wished(product.id)) {
       store.toggleWish(product.id);
       history.at(-1).wished = true;
+      saved = true;
       toast('Saved to your wishlist');
     }
     api.track(dir > 0 ? 'keep' : 'pass', product.id);
     undoBtn.disabled = false;
     if (queue.length <= 10 && remaining > 0) fill();
     render();
+
+    // After render(), not before: render() calls deck.replaceChildren(), which
+    // would take the burst layer straight back out again.
+    if (saved) {
+      burst(deck);
+      pop(root.querySelector('.round.keep'));
+    }
   }
 
   function decide(dir) {
@@ -237,6 +272,11 @@ export function deckScreen({ onOpen }) {
   addEventListener('keydown', keys);
   root.addEventListener('screen:leave', () => removeEventListener('keydown', keys));
 
+  // fill() sets `loading` synchronously and resolves later, so rendering right
+  // after it — without awaiting — paints the ghost cards for exactly as long as
+  // the first page takes. Awaiting here instead meant the deck simply appeared,
+  // and a slow connection showed an empty frame with no explanation.
   fill();
+  render();
   return root;
 }

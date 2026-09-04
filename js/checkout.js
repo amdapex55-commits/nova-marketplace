@@ -15,6 +15,7 @@ import { api } from './api.js';
 import { store } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
 import { priceOrder, normalisePhone, prettyPhone, orderCode, RULES } from './money.mjs';
+import { statusRail } from './motion.js';
 
 const lineFrom = p => ({ id: p.id, seller_id: p.seller_id, title: p.title, price: p.price, photo: p.photos[0], city: p.city, brand: p.seller.brand_name });
 
@@ -457,14 +458,18 @@ export async function orderScreen({ code, onHome, onOrders }) {
       <header><h2>${order.shipments.length} ${order.shipments.length === 1 ? 'parcel' : 'parcels'}</h2><span class="note">${order.express ? 'Express' : 'Standard'}</span></header>
     </div>`);
   for (const sh of order.shipments) {
-    ship.append(el(`
+    const row = el(`
       <div class="ship">
         <div class="hd"><b>${esc(sh.seller)}</b><span class="num">${money(sh.total)}</span></div>
         <ul>
           ${sh.lines.map(l => `<li><span>${esc(l.title)} × ${l.qty}</span><span class="num">${money(l.price * l.qty)}</span></li>`).join('')}
           <li><span>Delivery from ${esc(sh.from)}</span><span class="num">${sh.delivery === 0 ? 'Free' : money(sh.delivery)}</span></li>
         </ul>
-      </div>`));
+      </div>`);
+    // The same rail the seller sees in their inbox, so the two can never
+    // disagree about where a parcel has got to.
+    row.append(statusRail(sh.status || 'placed'));
+    ship.append(row);
   }
   ship.append(el(`
     <div class="totals">

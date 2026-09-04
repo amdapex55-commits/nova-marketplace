@@ -11,6 +11,8 @@
 import { auth, rpc, db, storage } from './sb.js';
 import { prepare, baseKey, objectName, objectNames } from './photos.js';
 import { el, esc, ICON, money, toast } from '../ui.js';
+import { statusRail, pop } from '../motion.js';
+import { adminSuite } from './admin.js';
 
 const app = document.getElementById('app');
 const INTERESTS = [
@@ -293,7 +295,7 @@ async function editor(productId = null) {
     thumbs.replaceChildren();
     photos.forEach((p, i) => {
       const t = el(`
-        <div class="thumb">
+        <div class="thumb" data-photo="${esc(p.id || p.rowId || '')}">
           <img src="${esc(p.preview)}" alt="">
           ${i === 0 ? '<span class="badge">card</span>' : ''}
           <button aria-label="Remove photo">&times;</button>
@@ -353,13 +355,33 @@ async function editor(productId = null) {
 
       // Upload anything new. Each photo is three objects under one random id;
       // the row stores the id, not the variant.
+      let uploaded = 0;
       for (const [i, p] of photos.entries()) {
         if (p.saved) continue;
+        uploaded++;
         const key = baseKey(me.id, row.id, p.id);
-        for (const [variant, out] of Object.entries(p.variants)) {
+
+        // A ring on the thumbnail itself, filled per variant. Three files go up
+        // for every photograph, so a single spinner would sit still for most of
+        // the wait and look stuck.
+        const tile = sheet.querySelector(`.thumb[data-photo="${p.id}"]`);
+        const ring = el(`
+          <span class="ring" aria-hidden="true">
+            <svg viewBox="0 0 32 32">
+              <circle class="track" cx="16" cy="16" r="14"></circle>
+              <circle class="bar" cx="16" cy="16" r="14"></circle>
+            </svg>
+          </span>`);
+        tile?.append(ring);
+        const bar = ring.querySelector('.bar');
+
+        const variants = Object.entries(p.variants);
+        for (const [n, [variant, out]] of variants.entries()) {
           btn.textContent = `Uploading ${i + 1} of ${photos.length}…`;
           await storage.upload(objectName(key, variant), out.blob);
+          if (bar) bar.style.strokeDashoffset = String(88 - 88 * ((n + 1) / variants.length));
         }
+        tile?.classList.add('done-upload');
         await db.insert('photos', {
           product_id: row.id, position: i, key,
           width: p.variants.full.width, height: p.variants.full.height
@@ -380,6 +402,11 @@ async function editor(productId = null) {
       for (const [i, p] of photos.entries()) {
         if (p.rowId) await db.update('photos', `id=eq.${p.rowId}`, { position: i });
       }
+
+      // Let the last ring visibly close before the sheet goes. Without this the
+      // final frame of the upload is never seen — the work reads as having been
+      // interrupted rather than finished.
+      if (uploaded) await new Promise(r => setTimeout(r, 420));
 
       toast(existing ? 'Saved' : 'Listing saved as a draft');
       close();
@@ -439,6 +466,8 @@ async function orders() {
         </div>
         <div class="acts"></div>
       </div>`);
+
+    card.querySelector('.to').insertAdjacentElement('beforebegin', statusRail(s.status));
 
     const acts = card.querySelector('.acts');
     for (const [status, label] of NEXT[s.status] || []) {
@@ -516,6 +545,7 @@ async function render() {
   me = await rpc('me');
   if (!me) { app.replaceChildren(registerShop()); return; }
 
+
   const shell = el(`
     <div>
       <div class="bar">
@@ -567,10 +597,31 @@ async function render() {
   app.setAttribute('aria-busy', 'false');
 }
 
+/* Which suite a signed-in account gets.
+ *
+ * Postgres answers this, not the browser: is_admin() reads a table that has no
+ * grant for anyone, and every function the control screens call re-checks it.
+ * So this is a routing decision about what to draw, and carries no authority of
+ * its own — an account that is not in `admins` gets refused by the database
+ * whatever this returns.
+ *
+ * `preferShop` lets an account that is both switch back to its own workspace.
+ */
+let preferShop = false;
+
 async function boot() {
   app.setAttribute('aria-busy', 'true');
   if (!auth.signedIn) { app.replaceChildren(signedOut()); app.setAttribute('aria-busy', 'false'); return; }
   try {
+    const [control, shop] = await Promise.all([rpc('is_admin'), rpc('me')]);
+    me = shop;
+    if (control && !preferShop) {
+      await adminSuite({
+        alsoASeller: !!shop,
+        onSwitchToShop: () => { preferShop = true; boot(); }
+      });
+      return;
+    }
     await render();
   } catch (err) {
     // An expired or revoked session should return someone to the sign-in

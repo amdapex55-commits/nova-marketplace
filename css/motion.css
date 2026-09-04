@@ -1,0 +1,227 @@
+/* Nova's motion.
+ *
+ * One idea runs through all of it: the dot. It orbits on the splash, it is the
+ * pip on the tab bar, it bursts when something is saved, it flies into the bag,
+ * it draws the tick on a placed order, and it rings a photo while it uploads.
+ * A single mark doing every job is what makes a small app feel like one thing
+ * rather than a pile of screens.
+ *
+ * Rules kept throughout:
+ *   - transform and opacity only, so nothing here triggers layout
+ *   - anything decorative is aria-hidden and pointer-events: none
+ *   - every effect is off under prefers-reduced-motion, and the app still works
+ */
+
+:root {
+  --ease-out: cubic-bezier(.22, .8, .3, 1);
+  --ease-in-out: cubic-bezier(.6, 0, .3, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+}
+
+/* ---------------------------------------------- 1. the dot/orbit splash ---- */
+.orbit { position: relative; width: 132px; height: 132px; display: grid; place-items: center; }
+.orbit .ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, .16);
+}
+.orbit .ring.two { inset: 17px; border-style: dashed; opacity: .5; }
+.orbit .sat {
+  position: absolute; inset: 0;
+  animation: orbit-spin 2.6s linear infinite;
+}
+.orbit .sat i {
+  position: absolute; top: -5px; left: 50%; margin-left: -5px;
+  width: 10px; height: 10px; border-radius: 50%; background: var(--marigold);
+  box-shadow: 0 0 14px rgba(224, 160, 16, .75);
+}
+.orbit .sat.slow { animation-duration: 4.1s; animation-direction: reverse; }
+.orbit .sat.slow i { width: 6px; height: 6px; margin-left: -3px; background: #9fd6c4; box-shadow: none; opacity: .8; }
+.orbit .core {
+  width: 54px; height: 54px; border-radius: 50%;
+  background: rgba(255, 255, 255, .07);
+  display: grid; place-items: center;
+  animation: core-breathe 2.6s var(--ease-in-out) infinite;
+}
+.orbit .core b {
+  width: 15px; height: 15px; border-radius: 50%; background: #fff;
+}
+@keyframes orbit-spin { to { transform: rotate(360deg); } }
+@keyframes core-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.09); } }
+
+/* The wordmark resolves out of the orbit rather than fading in beside it. */
+.splash .mark { animation: rise .62s var(--ease-out) .35s both; }
+.splash .tag  { animation: rise .6s var(--ease-out) .55s both; }
+
+/* --------------------------------------------- 2. card reveal after splash - */
+/* The first deck lifts into place once, so the app opens with a gesture rather
+   than a paint. Later renders must not repeat it — a card that re-enters every
+   time a page updates reads as a bug. */
+.deck.first-reveal .swipe-card { animation: card-lift .5s var(--ease-out) both; }
+.deck.first-reveal .swipe-card:nth-last-child(1) { animation-delay: .04s; }
+.deck.first-reveal .swipe-card:nth-last-child(2) { animation-delay: .02s; }
+.deck.first-reveal .swipe-card:nth-last-child(3) { animation-delay: 0s; }
+@keyframes card-lift {
+  from { transform: translate3d(0, 34px, 0) scale(.94); opacity: 0; }
+}
+
+/* ------------------------------------------------ 4. save burst ------------ */
+.burst { position: absolute; inset: 0; pointer-events: none; overflow: visible; z-index: 5; }
+.burst i {
+  position: absolute; top: 50%; left: 50%;
+  width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%; background: var(--emerald);
+  animation: burst-out .62s var(--ease-out) forwards;
+}
+.burst i:nth-child(odd) { background: var(--marigold); width: 6px; height: 6px; margin: -3px 0 0 -3px; }
+@keyframes burst-out {
+  0%   { transform: translate3d(0, 0, 0) scale(.3); opacity: 1; }
+  70%  { opacity: 1; }
+  100% { transform: translate3d(var(--dx), var(--dy), 0) scale(.9); opacity: 0; }
+}
+/* The heart itself kicks, so the burst has something to come from. */
+.heart.popped svg, .round.keep.popped svg { animation: kick .42s var(--ease-spring); }
+@keyframes kick { 0% { transform: scale(1); } 38% { transform: scale(1.38); } 100% { transform: scale(1); } }
+
+/* ------------------------------------------- 5. add-to-bag magnet ---------- */
+/* A thumbnail flies from the product to the bag tab, so the count changing is
+   explained rather than just noticed. */
+.magnet {
+  position: fixed; z-index: 70; border-radius: 10px; overflow: hidden;
+  pointer-events: none; box-shadow: var(--shadow-card);
+  transition: transform .62s var(--ease-in-out), opacity .62s ease, border-radius .62s ease;
+}
+.magnet img { width: 100%; height: 100%; object-fit: cover; }
+.tab.bumped svg { animation: kick .42s var(--ease-spring); }
+.pip.bumped { animation: pip-pop .42s var(--ease-spring); }
+@keyframes pip-pop { 0% { transform: scale(1); } 40% { transform: scale(1.45); } 100% { transform: scale(1); } }
+
+/* ------------------------------------------------ 6. order tick ------------ */
+.done .tick { animation: tick-in .5s var(--ease-spring) both; }
+.done .tick svg path {
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
+  animation: tick-draw .42s var(--ease-out) .28s forwards;
+}
+.done .tick::after {
+  content: ''; position: absolute; inset: -6px; border-radius: 50%;
+  border: 2px solid var(--emerald); opacity: 0;
+  animation: tick-ring .8s var(--ease-out) .3s;
+}
+.done .tick { position: relative; }
+@keyframes tick-in { from { transform: scale(.5); opacity: 0; } }
+@keyframes tick-draw { to { stroke-dashoffset: 0; } }
+@keyframes tick-ring {
+  0%   { transform: scale(.85); opacity: .9; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+.done .code { animation: rise .45s var(--ease-out) .5s both; }
+
+/* ----------------------------------------- 7. upload progress rings -------- */
+.thumb .ring {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  background: rgba(22, 26, 24, .55); backdrop-filter: blur(1px);
+}
+.thumb .ring svg { width: 34px; height: 34px; transform: rotate(-90deg); }
+.thumb .ring circle { fill: none; stroke-width: 3.5; }
+.thumb .ring .track { stroke: rgba(255, 255, 255, .28); }
+.thumb .ring .bar {
+  stroke: var(--marigold); stroke-linecap: round;
+  stroke-dasharray: 88; stroke-dashoffset: 88;
+  transition: stroke-dashoffset .3s var(--ease-out);
+}
+.thumb.done-upload .ring { animation: ring-out .4s ease .15s forwards; }
+@keyframes ring-out { to { opacity: 0; transform: scale(1.1); } }
+
+/* --------------------------------------------- 8. order status rail -------- */
+.rail { display: flex; align-items: center; margin: 13px 0 2px; }
+.rail .stop { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: none; width: 62px; }
+.rail .stop i {
+  width: 13px; height: 13px; border-radius: 50%;
+  background: var(--card); border: 2px solid var(--rule);
+  transition: background .3s var(--ease-out), border-color .3s var(--ease-out), transform .3s var(--ease-spring);
+}
+.rail .stop span { font-size: 10.5px; font-weight: 600; color: var(--ink-faint); letter-spacing: .01em; }
+.rail .stop.on i { background: var(--emerald); border-color: var(--emerald); }
+.rail .stop.on span { color: var(--emerald-dark); }
+.rail .stop.now i { transform: scale(1.35); box-shadow: 0 0 0 5px var(--emerald-soft); }
+.rail .stop.refused i { background: var(--danger); border-color: var(--danger); }
+.rail .link { flex: 1; height: 2px; background: var(--rule); position: relative; overflow: hidden; margin: 0 -8px; margin-bottom: 18px; }
+.rail .link b {
+  position: absolute; inset: 0; background: var(--emerald);
+  transform: scaleX(0); transform-origin: left;
+  transition: transform .45s var(--ease-out);
+}
+.rail .link.filled b { transform: scaleX(1); }
+
+/* ------------------------------------------ 9. promoted card shimmer ------- */
+/* Deliberately restrained. A promoted listing should read as lit, not as an
+   advertisement flashing at someone — the deck's whole value is that every card
+   looks worth seeing. */
+.promoted { position: relative; }
+.promoted::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background: linear-gradient(105deg,
+    transparent 38%, rgba(255, 255, 255, .34) 50%, transparent 62%);
+  transform: translateX(-120%);
+  animation: shimmer 4.4s var(--ease-in-out) infinite;
+}
+@keyframes shimmer {
+  0%, 62% { transform: translateX(-120%); }
+  100%    { transform: translateX(120%); }
+}
+.promo-flag {
+  position: absolute; top: 10px; left: 10px; z-index: 3;
+  font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  background: var(--marigold); color: #3d2a02; padding: 3px 8px; border-radius: 5px;
+}
+
+/* -------------------------------------- 10. empty deck ghost refill -------- */
+/* Named `ghost-card`, not `ghost`. The app already uses `.btn.ghost` for every
+   secondary button, and a bare `.ghost` rule here matched all of them — giving
+   them position:absolute and opacity:.5, which turned each one into a
+   half-transparent sheet across the whole page. A generic word in a shared
+   stylesheet is a collision waiting to happen; keep these names specific. */
+.ghosts { position: absolute; inset: 0; }
+.ghost-card {
+  position: absolute; inset: 0; border-radius: 20px;
+  background: var(--card); box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.ghost-card:nth-child(1) { transform: translate3d(0, 18px, 0) scale(.93); opacity: .5; }
+.ghost-card:nth-child(2) { transform: translate3d(0, 9px, 0) scale(.965); opacity: .75; }
+.ghost-card .sk { position: absolute; background: var(--sunken); border-radius: 6px; overflow: hidden; }
+.ghost-card .sk::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .7), transparent);
+  transform: translateX(-100%);
+  animation: sweep 1.35s var(--ease-in-out) infinite;
+}
+.ghost-card .sk.photo { top: 0; left: 0; right: 0; bottom: 92px; border-radius: 20px 20px 0 0; }
+.ghost-card .sk.line  { left: 16px; height: 13px; }
+.ghost-card .sk.line.a { bottom: 58px; width: 42%; }
+.ghost-card .sk.line.b { bottom: 32px; width: 68%; height: 17px; }
+.ghost-card .sk.line.c { bottom: 12px; width: 30%; }
+@keyframes sweep { to { transform: translateX(100%); } }
+
+/* Centred over the stack, not below it — below put it straight on top of the
+   pass/save buttons. A pill keeps it legible against the shimmering skeleton. */
+.refill-note {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  margin: 0; padding: 8px 15px; border-radius: 999px; white-space: nowrap;
+  background: rgba(255, 255, 255, .92); box-shadow: 0 1px 8px -3px rgba(22, 26, 24, .35);
+  font-size: 13px; color: var(--ink-soft); font-weight: 600;
+}
+
+/* --------------------------------------------------------------- shared ---- */
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+.fade-in { animation: rise .34s var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit .sat, .orbit .core, .promoted::after, .ghost-card .sk::after { animation: none !important; }
+  .promoted::after { opacity: 0; }
+  .deck.first-reveal .swipe-card { animation: none !important; }
+  .burst { display: none; }
+  .magnet { display: none; }
+  .done .tick, .done .tick svg path, .done .tick::after, .done .code { animation: none !important; }
+  .done .tick svg path { stroke-dashoffset: 0; }
+}
