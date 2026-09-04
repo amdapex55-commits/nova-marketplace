@@ -33,6 +33,40 @@ export function priceHtml(p) {
          `<span class="cut">−${cut}%</span>`;
 }
 
+/* ---------------------------------------------------------- the promises --- */
+/* The three things a buyer actually worries about before paying a stranger cash
+   at their door. They belong at the point of decision — on the listing, in the
+   bag and on the order — not behind a link to a terms page nobody opens.
+   Every one is enforced by the code: the cancel window is a real 24 hours in
+   cancel_order(), the money genuinely never passes through us, and refusing a
+   parcel costs nothing because nothing has been charged. */
+export const POLICIES = [
+  ['shield', 'Check it at the door', 'Open the parcel before you pay the rider. Not what was listed? Do not take it — refusing costs you nothing.'],
+  ['clock', 'Free to cancel for 24 hours', 'Changed your mind? Cancel from your order page any time in the first day, as long as it has not been posted.'],
+  ['cash', 'Cash on delivery', 'Pay the seller when it arrives. Nova never holds your money and never asks for a card.']
+];
+
+const POLICY_ICON = {
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3 5 6v6c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/></svg>',
+  cash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><circle cx="12" cy="12" r="2.6"/></svg>'
+};
+
+export function policyStrip({ compact = false } = {}) {
+  const wrap = el(`<div class="policies${compact ? ' compact' : ''}"></div>`);
+  for (const [icon, title, body] of POLICIES) {
+    wrap.append(el(`
+      <div class="policy">
+        <span class="policy-i" aria-hidden="true">${POLICY_ICON[icon]}</span>
+        <div><b>${esc(title)}</b>${compact ? '' : `<span>${esc(body)}</span>`}</div>
+      </div>`));
+  }
+  if (!compact) {
+    wrap.append(el('<a class="policy-more" href="#/legal">Read the full terms</a>'));
+  }
+  return wrap;
+}
+
 /* --------------------------------------------------------- variant picker -- */
 /* Returns { node, selected(), require() }. `require()` shakes the row and
    returns false when nothing is picked — a nudge rather than a red error,
@@ -123,26 +157,63 @@ export async function shopScreen({ id, onOpen, onBack, onMessage }) {
   const s = await api.shop(id);
   if (!s) return el('<div class="screen"><div class="empty"><h2>This shop is closed</h2><p>It may have been suspended, or the link is wrong.</p></div></div>');
 
+  const cover = s.cover_key
+    ? `${window.NOVAMKT.SUPABASE_URL}/storage/v1/object/public/product-photos/${s.cover_key}-full.webp`
+    : null;
+
   const root = el(`
     <div class="screen">
       <div class="scroll">
-        <div class="shop-hero">
+        <div class="shop-hero${cover ? ' has-cover' : ''}"${
+          cover ? ` style="background-image:linear-gradient(rgba(14,70,54,.72),rgba(14,70,54,.88)),url('${esc(cover)}')"` : ''}>
           <button class="back" aria-label="Back" style="color:#fff;margin:0 0 6px -6px">${ICON.back}</button>
           <div class="shop-avatar">${esc(initials(s.brand_name))}</div>
-          <h1>${esc(s.brand_name)}</h1>
-          <div class="sub">${esc(s.city)} · ships in ${s.dispatch_days === 0 ? 'the same day' : `${s.dispatch_days} day${s.dispatch_days === 1 ? '' : 's'}`}</div>
+          <h1>${esc(s.brand_name)}${s.founder ? '<span class="founder">Founder shop</span>' : ''}</h1>
+          <div class="sub">${esc(s.city)} · since ${new Date(s.since).toLocaleDateString('en-PK', { month: 'long', year: 'numeric' })}</div>
           <div class="shop-facts">
             <div><b>${s.live}</b><span>listings</span></div>
             <div><b>${s.delivered}</b><span>delivered</span></div>
             <div><b>${s.rating ? Number(s.rating).toFixed(1) : '—'}</b><span>${s.reviews} review${s.reviews === 1 ? '' : 's'}</span></div>
           </div>
         </div>
+        <div id="story"></div>
         <div class="pad" style="padding:14px">
           <button class="btn ghost block" id="ask">Message this shop</button>
         </div>
+        <div id="shop-reviews"></div>
         <div class="grid"></div>
       </div>
     </div>`);
+
+  /* The story and the promise. A page with a name and a grid is a search
+     result; a page with a story and a promise it has actually kept is a shop. */
+  const story = root.querySelector('#story');
+  if (s.story) {
+    story.append(el(`<div class="shop-story"><p>${esc(s.story)}</p></div>`));
+  }
+  story.append(el(`
+    <div class="promise">
+      <div><b>${s.dispatch_days === 0 ? 'Same day' : `${s.dispatch_days} day${s.dispatch_days === 1 ? '' : 's'}`}</b><span>to post your parcel</span></div>
+      ${s.on_time !== null && s.on_time !== undefined
+        ? `<div><b>${s.on_time}%</b><span>arrived on time</span></div>`
+        : '<div><b>New</b><span>not enough deliveries yet</span></div>'}
+      <div><b>${s.delivered}</b><span>parcels delivered</span></div>
+    </div>`));
+
+  if ((s.latest_reviews || []).length) {
+    const box = el(`<div class="group"><header><h2>What buyers said</h2><span class="note">${s.reviews}</span></header></div>`);
+    for (const r of s.latest_reviews) {
+      box.append(el(`
+        <div class="review">
+          <div class="who">${stars(r.rating)}<b>${esc(r.by)}</b>
+            <span style="margin-left:auto;font-size:12.5px;color:var(--ink-faint)">${
+              new Date(r.at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short' })}</span></div>
+          ${r.body ? `<p>${esc(r.body)}</p>` : ''}
+          ${r.product ? `<p style="font-size:12.5px;color:var(--ink-faint)">on ${esc(r.product)}</p>` : ''}
+        </div>`));
+    }
+    root.querySelector('#shop-reviews').append(box);
+  }
 
   root.querySelector('.back').addEventListener('click', onBack);
   root.querySelector('#ask').addEventListener('click', () => onMessage(s.id, null));

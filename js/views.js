@@ -3,7 +3,7 @@ import { api } from './api.js';
 import { store } from './store.js';
 import { el, esc, ICON, money, toast } from './ui.js';
 import { burst, pop, magnetToBag } from './motion.js';
-import { priceHtml, variantPicker, stars, reviewList } from './shop.js';
+import { priceHtml, variantPicker, stars, reviewList, policyStrip } from './shop.js';
 
 /* --------------------------------------------------------------- onboarding */
 /* Both steps are skippable, and the question is "who are you shopping for",
@@ -313,6 +313,7 @@ export async function productScreen({ id, onBack, onBag, onShop, onMessage }) {
           <div class="pad" style="padding:14px 0 0">
             <button class="btn ghost block" id="ask-shop">Ask ${esc(p.seller.brand_name)} a question</button>
           </div>
+          <div id="policies"></div>
           <div id="reviews"></div>
           <div class="fineprint">
             <a href="#/legal">How buying on Nova works</a>
@@ -343,6 +344,8 @@ export async function productScreen({ id, onBack, onBag, onShop, onMessage }) {
     const hi = p.seller.dispatch_days + (same ? 2 : 5);
     root.querySelector('#eta').textContent = `${lo}–${hi} days to ${city}`;
   }
+
+  root.querySelector('#policies').append(policyStrip());
 
   reviewList(p.id).then(node => { if (node) root.querySelector('#reviews').append(node); });
 
@@ -546,6 +549,8 @@ export function legalScreen({ onBack }) {
     const hi = p.seller.dispatch_days + (same ? 2 : 5);
     root.querySelector('#eta').textContent = `${lo}–${hi} days to ${city}`;
   }
+
+  root.querySelector('#policies').append(policyStrip());
 
   reviewList(p.id).then(node => { if (node) root.querySelector('#reviews').append(node); });
   return root;

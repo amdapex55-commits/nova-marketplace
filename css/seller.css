@@ -236,3 +236,103 @@ body.seller { background: var(--paper); }
   .workspace > #pane .rows .row:nth-last-child(2),
   .admin > #pane .rows .row:nth-last-child(2) { border-bottom: 0; }
 }
+
+/* ============================================================================
+   The pitch. Shown to anyone who has not signed in here before.
+   ========================================================================== */
+.pitch { padding-bottom: 8px; }
+
+.pitch-hero {
+  position: relative; overflow: hidden;
+  padding: 34px 20px 30px; background: var(--emerald); color: #fff;
+}
+.pitch-hero::after {
+  content: ''; position: absolute; top: -90px; right: -70px;
+  width: 260px; height: 260px; border-radius: 50%;
+  background: rgba(224, 160, 16, .15);
+  animation: drift 18s var(--ease-in-out) infinite alternate;
+}
+.pitch-hero > * { position: relative; z-index: 1; }
+.pitch-hero .mark {
+  font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700;
+  font-size: 21px; letter-spacing: -.03em; display: block; margin-bottom: 18px;
+}
+.pitch-hero .mark em { font-style: normal; color: var(--marigold); }
+.spots {
+  display: inline-block; margin-bottom: 12px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  background: var(--marigold); color: #3d2a02; padding: 4px 10px; border-radius: 999px;
+  animation: pip-pop .5s var(--ease-spring) both;
+}
+.pitch-hero h1 {
+  font-size: clamp(28px, 6vw, 40px); line-height: 1.08; letter-spacing: -.02em;
+  margin: 0 0 12px; max-width: 16ch; animation: rise .5s var(--ease-out) both;
+}
+.pitch-hero p {
+  margin: 0; color: #cfe3db; font-size: 16px; line-height: 1.55; max-width: 46ch;
+  animation: rise .5s var(--ease-out) .08s both;
+}
+
+.pitch-grid { display: grid; gap: 1px; background: var(--rule); border-bottom: 1px solid var(--rule); }
+@media (min-width: 680px) { .pitch-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1100px) { .pitch-grid { grid-template-columns: repeat(4, 1fr); } }
+.claim { background: var(--card); padding: 22px 20px 24px; }
+.claim b {
+  display: block; font-family: "Familjen Grotesk", system-ui, sans-serif;
+  font-weight: 700; font-size: 34px; letter-spacing: -.03em; color: var(--emerald);
+}
+.claim h3 {
+  font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 600;
+  font-size: 16px; margin: 2px 0 8px;
+}
+.claim p { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--ink-soft); }
+
+.pitch-how, .pitch-truth { padding: 26px 20px; }
+.pitch-how { background: var(--card); border-bottom: 1px solid var(--rule); }
+.pitch-how h2, .pitch-truth h2 {
+  font-family: "Familjen Grotesk", system-ui, sans-serif; font-weight: 700;
+  font-size: 21px; margin: 0 0 14px;
+}
+.pitch-how ol { margin: 0; padding-left: 20px; max-width: 60ch; }
+.pitch-how li { margin: 9px 0; font-size: 15px; line-height: 1.55; color: var(--ink-soft); }
+.pitch-how li b { color: var(--ink); font-weight: 600; }
+
+/* The honest half. A pitch with no downside in it is one a seller stops
+   believing the first time reality disagrees. */
+.pitch-truth ul { list-style: none; margin: 0; padding: 0; max-width: 62ch; }
+.pitch-truth li {
+  margin: 0 0 12px; padding-left: 18px; position: relative;
+  font-size: 14.5px; line-height: 1.6; color: var(--ink-soft);
+}
+.pitch-truth li::before {
+  content: ''; position: absolute; left: 0; top: 9px;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--marigold);
+}
+.pitch-truth li b { color: var(--ink); font-weight: 600; }
+
+/* ---- the insights funnel ------------------------------------------------ */
+.funnel { padding: 6px 15px 16px; }
+.step { padding: 11px 0; border-bottom: 1px solid var(--rule-soft); }
+.step:last-child { border-bottom: 0; }
+.step-head { display: flex; align-items: baseline; gap: 10px; }
+.step-head b { font-family: "Familjen Grotesk", system-ui, sans-serif; font-size: 15.5px; font-weight: 600; }
+.step-head span { margin-left: auto; font-weight: 700; font-size: 16px; }
+.step-head i {
+  font-style: normal; font-size: 12px; font-weight: 700; letter-spacing: .03em;
+  background: var(--emerald-soft); color: var(--emerald-dark);
+  padding: 2px 7px; border-radius: 5px;
+}
+.step-head i.weak { background: var(--marigold-soft); color: #6b4a02; }
+.step-bar { height: 7px; border-radius: 4px; background: var(--sunken); margin: 7px 0 5px; overflow: hidden; }
+.step-bar b {
+  display: block; height: 100%; border-radius: 4px; background: var(--emerald);
+  transform-origin: left; animation: grow .7s var(--ease-out) both;
+}
+@keyframes grow { from { transform: scaleX(0); } }
+.step-what { font-size: 12.5px; color: var(--ink-faint); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pitch-hero::after, .pitch-hero h1, .pitch-hero p, .spots, .step-bar b { animation: none !important; }
+}
+
+.stats dd small { font-size: 13px; font-weight: 600; color: var(--ink-faint); letter-spacing: 0; }

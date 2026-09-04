@@ -453,3 +453,47 @@ input, select, textarea { font: inherit; color: inherit; }
 .state.delivered  { background: var(--emerald); color: #fff; }
 .state.refused    { background: var(--danger-soft); color: var(--danger); }
 
+
+/* The three promises. At the point of decision — on the listing, in the bag and
+   at checkout — rather than behind a terms link nobody opens. */
+.policies {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--rule-soft); border: 1px solid var(--rule-soft);
+  border-radius: var(--r); overflow: hidden; margin: 18px 0 0;
+}
+.policy { display: flex; gap: 12px; padding: 13px 14px; background: var(--card); align-items: flex-start; }
+.policy-i {
+  flex: none; width: 34px; height: 34px; border-radius: 10px;
+  display: grid; place-items: center;
+  background: var(--emerald-soft); color: var(--emerald);
+}
+.policy-i svg { width: 19px; height: 19px; }
+.policy b { display: block; font-size: 14.5px; font-weight: 600; }
+.policy span { display: block; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); margin-top: 2px; }
+.policy-more {
+  display: block; padding: 11px 14px; background: var(--card);
+  font-size: 13px; color: var(--ink-faint); text-decoration: underline; text-underline-offset: 3px;
+}
+.policies.compact { margin: 0 14px 14px; flex-direction: row; gap: 1px; }
+.policies.compact .policy { flex: 1; flex-direction: column; gap: 7px; padding: 12px 10px; text-align: center; align-items: center; }
+.policies.compact .policy b { font-size: 12.5px; line-height: 1.3; }
+
+/* Shop story and promise */
+.shop-story { padding: 18px 16px 4px; }
+.shop-story p { margin: 0; font-size: 15.5px; line-height: 1.6; color: var(--ink-soft); max-width: 60ch; }
+.promise {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+  background: var(--rule-soft); border-block: 1px solid var(--rule-soft);
+  margin: 16px 0 0;
+}
+.promise div { background: var(--card); padding: 13px 12px; text-align: center; }
+.promise b {
+  display: block; font-family: "Familjen Grotesk", system-ui, sans-serif;
+  font-weight: 700; font-size: 18px; color: var(--emerald-dark);
+}
+.promise span { display: block; font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; line-height: 1.35; }
+.founder {
+  display: inline-block; margin-left: 9px; vertical-align: middle;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  background: var(--marigold); color: #3d2a02; padding: 3px 8px; border-radius: 999px;
+}
