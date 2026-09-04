@@ -212,7 +212,9 @@ export async function productScreen({ id, onBack, onBag }) {
             <div><dt>Condition</dt><dd>${esc(p.condition)}</dd></div>
             <div><dt>Ships from</dt><dd>${esc(p.city)}</dd></div>
             <div><dt>In stock</dt><dd>${p.stock > 0 ? `${p.stock} left` : 'Sold out'}</dd></div>
-            <div><dt>Seller rating</dt><dd>${esc(p.seller.rating)} / 5</dd></div>
+            <div><dt>Shop</dt><dd>${p.seller.delivered > 0
+              ? `${p.seller.delivered} delivered`
+              : 'New here'}</dd></div>
           </dl>
           <div class="fineprint">
             <a href="#/legal">How buying on Nova works</a>
