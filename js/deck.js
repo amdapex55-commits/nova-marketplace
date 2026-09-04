@@ -55,6 +55,8 @@ export function deckScreen({ onOpen }) {
     [f.id, { queue: [], history: [], offset: 0, remaining: 0, loaded: false }]));
   let loading = false;
   let busy = false;        // a card is mid-flight
+  // One automatic loop per visit. Twice would be a carousel nobody can leave.
+  let looped = false;
 
   const D = () => decks[feed];
 
@@ -148,6 +150,20 @@ export function deckScreen({ onOpen }) {
     if (!D().queue.length && (loading || D().remaining > 0)) {
       deck.append(ghostDeck());
       countEl.textContent = '';
+      return;
+    }
+
+    /* Out of cards on "For you"? Start the deck again rather than stopping to
+       ask. A deck that ends is a deck someone closes; a deck that loops is one
+       they keep swiping — and everything they have already decided on is still
+       remembered, so the second pass is a second look, not a reset. */
+    if (!D().queue.length && feed === 'you' && !loading && store.get().seen.length > 0 && !looped) {
+      looped = true;
+      store.resetSeen();
+      Object.values(decks).forEach(d => { d.queue = []; d.offset = 0; d.loaded = false; });
+      deck.replaceChildren(ghostDeck('Bringing them back around…'));
+      countEl.textContent = '';
+      fill();
       return;
     }
 

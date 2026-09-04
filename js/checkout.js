@@ -17,7 +17,7 @@ import { el, esc, ICON, money, toast } from './ui.js';
 import { priceOrder, normalisePhone, prettyPhone, orderCode, RULES } from './money.mjs';
 import { statusRail } from './motion.js';
 import { reviewSheet, policyStrip } from './shop.js';
-import { account, signUpGate } from './account.js';
+import { account, signUpGate, gateScreen } from './account.js';
 
 const lineFrom = p => ({ id: p.id, seller_id: p.seller_id, title: p.title, price: p.price, photo: p.photos[0], city: p.city, brand: p.seller.brand_name });
 
@@ -44,6 +44,18 @@ async function bagLines() {
 
 /* ------------------------------------------------------------------ the bag */
 export async function bagScreen({ onOpen, onCheckout }) {
+  /* The barrier sits here, at the bag.
+   *
+   * Adding to a bag stays free — the swipe, the save and the magnet all work
+   * signed out — but opening it asks for an account. It used to sit at
+   * checkout, which meant the last screen before paying was a form, and on a
+   * phone that showed as a placeholder that never resolved. Here it is a screen
+   * in its own right, not a sheet over a stub, so there is never a "one
+   * moment…" with nothing behind it. */
+  if (!account.signedIn || !(await api.meBuyer().catch(() => null))) {
+    return gateScreen({ onDone: () => onCheckout.refresh(), onCancel: () => history.back() });
+  }
+
   const lines = await bagLines();
   const root = el(`
     <div class="screen">
@@ -138,18 +150,11 @@ export async function checkoutScreen({ onBack, onPlaced }) {
   const lines = await bagLines();
   if (!lines.length) { onBack(); return el('<div class="screen"></div>'); }
 
-  /* The barrier. Everything before this is account-free on purpose; from here
-     on an order needs a name, an email and a phone anyway, so we ask once and
-     keep them. Cancelling goes back to the bag rather than stranding anyone on
-     a form they did not want. */
-  if (!account.signedIn || !(await api.meBuyer())) {
-    signUpGate({
-      el, esc, api, store,
-      onDone: () => location.reload(),
-      onCancel: onBack
-    });
-    return el('<div class="screen"><div class="empty"><p>One moment…</p></div></div>');
-  }
+  // The account is now required at the bag, so by here it exists. If it somehow
+  // does not — an expired session, a second tab — send them back rather than
+  // rendering a screen that cannot be completed.
+  const who = account.signedIn ? await api.meBuyer().catch(() => null) : null;
+  if (!who) { onBack(); return el('<div class="screen"></div>'); }
   const sellers = await api.sellers();
   const saved = store.get().contact || {};
   const me = account.profile || {};

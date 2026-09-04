@@ -444,6 +444,7 @@ export async function accountScreen({ onOrder, onSignedOut }) {
           <div class="shop-avatar">${esc(initials(me.name))}</div>
           <h1>${esc(me.name)}</h1>
           <div class="sub">${esc(me.email)} · ${esc(me.phone)}</div>
+          ${me.ref ? `<div class="ref-chip">Customer <b>#${esc(me.ref)}</b></div>` : ''}
           <div class="shop-facts">
             <div><b>${orders.length}</b><span>order${orders.length === 1 ? '' : 's'}</span></div>
             <div><b>${new Date(me.since).toLocaleDateString('en-PK', { month: 'short', year: 'numeric' })}</b><span>joined</span></div>
