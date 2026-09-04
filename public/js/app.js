@@ -9,7 +9,8 @@ import { api } from './api.js';
 import { store } from './store.js';
 import { el, ICON } from './ui.js';
 import { onboarding, browseScreen, searchScreen, wishlistScreen, productScreen, legalScreen } from './views.js';
-import { shopScreen, offersScreen, inboxScreen, threadScreen } from './shop.js';
+import { shopScreen, offersScreen, inboxScreen, threadScreen, accountScreen } from './shop.js';
+import { account } from './account.js';
 import { deckScreen } from './deck.js';
 import { bagScreen, checkoutScreen, orderScreen, ordersScreen } from './checkout.js';
 
@@ -47,12 +48,25 @@ function tabBar(current) {
 
 let current = null;
 
+/* Signed in, the account is reachable from every screen; signed out there is
+   nothing to reach, and a sign-in prompt on a browsing app is exactly the
+   friction the no-account decision exists to avoid. */
+function accountLink() {
+  if (!account.signedIn) return null;
+  const a = el(`<a class="acct-chip" href="#/account" aria-label="Your account">${ICON.user}</a>`);
+  return a;
+}
+
 async function paint(builder, { tab = null } = {}) {
   // Let a screen clean up global listeners (the deck binds arrow keys).
   current?.dispatchEvent(new CustomEvent('screen:leave'));
   const screen = await builder();
   current = screen;
   app.replaceChildren(screen);
+  // Slot the account chip into whichever screen has a header.
+  const top = screen.querySelector('.top');
+  const chip = accountLink();
+  if (top && chip && !top.querySelector('.acct-chip')) top.append(chip);
   if (tab) app.append(tabBar(tab));
   app.setAttribute('aria-busy', 'false');
   // Each screen owns its own scroll pane, so a new screen must start at its top
@@ -85,6 +99,11 @@ async function route() {
         onBack: () => history.back(),
         onMessage: (sellerId, productId) => go(`#/ask/${sellerId}${productId ? '/' + productId : ''}`)
       }));
+    case 'account':
+      return paint(() => accountScreen({
+        onOrder: code => go(`#/order/${code}`),
+        onSignedOut: () => go('#/deck')
+      }), { tab: '#/bag' });
     case 'inbox':
       return paint(() => inboxScreen({ onOpen: id => go(`#/thread/${id}`) }), { tab: '#/bag' });
     case 'thread':

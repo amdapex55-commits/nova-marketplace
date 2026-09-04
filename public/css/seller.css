@@ -1,4 +1,8 @@
-/* Seller workspace. Sits on top of css/app.css and only adds what the buyer app
+/* The status chips moved to app.css — the buyer app needs them too (order
+   history, parcel status) and does not load this file. A rule two apps need
+   belongs in the one stylesheet they both load.
+
+   Seller workspace. Sits on top of css/app.css and only adds what the buyer app
    has no use for. Same palette, wider frame: a seller is usually at a desk with
    a spreadsheet open, while a buyer is one-handed on a phone. */
 
@@ -32,22 +36,6 @@ body.seller #app {
 .bar .who { margin-left: auto; text-align: right; line-height: 1.25; }
 .bar .who b { display: block; font-size: 14px; font-weight: 600; }
 .bar .who span { font-size: 12px; color: var(--ink-faint); }
-
-.state {
-  display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .07em;
-  text-transform: uppercase; padding: 3px 8px; border-radius: 5px; white-space: nowrap;
-}
-.state.pending    { background: var(--marigold-soft); color: #6b4a02; }
-.state.active,
-.state.live       { background: var(--emerald-soft); color: var(--emerald-dark); }
-.state.draft      { background: var(--sunken); color: var(--ink-faint); }
-.state.sold       { background: var(--danger-soft); color: var(--danger); }
-.state.suspended  { background: var(--danger-soft); color: var(--danger); }
-.state.placed     { background: var(--marigold-soft); color: #6b4a02; }
-.state.confirmed  { background: var(--sunken); color: var(--ink); }
-.state.dispatched { background: var(--emerald-soft); color: var(--emerald-dark); }
-.state.delivered  { background: var(--emerald); color: #fff; }
-.state.refused    { background: var(--danger-soft); color: var(--danger); }
 
 .nav { display: flex; gap: 4px; padding: 10px 12px 0; border-bottom: 1px solid var(--rule); background: var(--card); }
 .nav button {

@@ -24,5 +24,18 @@
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script type="module" src="js/seller/app.js"></script>
+<script>
+  /* Registered after load so it never competes with the first paint. Failure is
+     silent on purpose: the app works identically without it, and an install
+     error on an old browser is not something a shopper can act on. */
+  /* Not on localhost. A worker that caches the shell while you are editing it
+     serves yesterday's CSS and makes every change look like it did nothing. */
+  const onLocalhost = ['localhost', '127.0.0.1', '::1'].includes(location.hostname);
+  if ('serviceWorker' in navigator && !onLocalhost) {
+    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  } else if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()));
+  }
+</script>
 </body>
 </html>

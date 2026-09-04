@@ -986,3 +986,92 @@ test('a shop page shows only that shop, and only live listings', async () => {
   assert.equal(gone, 'null', 'a suspended shop has no page');
   await sql(`update sellers set status = 'active' where id = '${vSellerId}';`);
 });
+
+/* ------------------------------------------------- buyer accounts (0904190001) */
+
+const BUYER = '77777777-6666-5555-4444-333333333333';
+
+test('registering a buyer claims the guest orders they already placed', async () => {
+  // An order placed before signing up, from the same number.
+  const [[out]] = await sql(
+    `select place_order('${order([{ product_id: prodA1, qty: 1 }], { phone: '03009998888' })}'::jsonb)::text;`,
+    { role: 'anon' });
+  const guestCode = JSON.parse(out).code;
+  assert.equal((await sql(`select coalesce(user_id::text,'none') from orders where code = '${guestCode}';`))[0][0], 'none');
+
+  const [[me]] = await sql(
+    `select register_buyer('Sana Iqbal', 'SANA@Example.com ', '03009998888')::text;`,
+    { role: 'authenticated', uid: BUYER });
+  const b = JSON.parse(me);
+  assert.equal(b.name, 'Sana Iqbal');
+  assert.equal(b.email, 'sana@example.com', 'emails are stored lowercased and trimmed');
+  assert.equal(b.orders, 1, 'the guest order should now be theirs');
+
+  assert.equal((await sql(`select user_id::text from orders where code = '${guestCode}';`))[0][0], BUYER);
+});
+
+test('a bad phone is refused at registration, not at the door', async () => {
+  assert.match(await fails(`select register_buyer('X', 'x@y.com', '12345');`,
+                           { role: 'authenticated', uid: BUYER }), /Pakistani mobile number/);
+});
+
+test('an order placed while signed in is stamped with the account', async () => {
+  const [[out]] = await sql(
+    `select place_order('${order([{ product_id: prodA1, qty: 1 }], { phone: '03009998888' })}'::jsonb)::text;`,
+    { role: 'authenticated', uid: BUYER });
+  const code = JSON.parse(out).code;
+  assert.equal((await sql(`select user_id::text from orders where code = '${code}';`))[0][0], BUYER);
+});
+
+test('order history is the account, and only the account', async () => {
+  const [[mine]] = await sql(`select my_orders()::text;`, { role: 'authenticated', uid: BUYER });
+  const list = JSON.parse(mine);
+  assert.equal(list.length, 2, 'the guest order and the signed-in one');
+  assert.ok(list[0].code && list[0].total > 0 && list[0].sellers.length);
+
+  // Somebody else's account sees none of it.
+  const [[theirs]] = await sql(`select my_orders()::text;`,
+    { role: 'authenticated', uid: '11111111-1111-1111-1111-111111111111' });
+  assert.equal(JSON.parse(theirs).length, 0);
+
+  assert.ok(await fails('select my_orders();', { role: 'anon' }), 'anon has no history');
+});
+
+test('a signed-in buyer opens their own order without the phone', async () => {
+  const [[list]] = await sql(`select my_orders()::text;`, { role: 'authenticated', uid: BUYER });
+  const code = JSON.parse(list)[0].code;
+  const [[o]] = await sql(`select my_order('${code}')::text;`, { role: 'authenticated', uid: BUYER });
+  assert.equal(JSON.parse(o).code, code);
+
+  const [[nope]] = await sql(`select coalesce(my_order('${code}')::text, 'null');`,
+    { role: 'authenticated', uid: '11111111-1111-1111-1111-111111111111' });
+  assert.equal(nope, 'null', 'another account must not open it by code');
+});
+
+test('nobody can read the buyers table but its owner', async () => {
+  assert.match(await fails('select * from buyers;', { role: 'anon' }), /permission denied/i);
+  const rows = await sql('select count(*) from buyers;', { role: 'authenticated', uid: userA });
+  assert.equal(rows[0][0], '0', 'a seller sees no buyer rows');
+  assert.equal((await sql('select count(*) from buyers;', { role: 'authenticated', uid: BUYER }))[0][0], '1');
+});
+
+test('trending needs evidence, not just existence', async () => {
+  const [[before]] = await sql(`select trending(40)::text;`, { role: 'anon' });
+  const seen = new Set(JSON.parse(before).items.map(p => p.id));
+
+  // A listing nobody has looked at must not be "trending".
+  const [[sid]] = await sql(`select id from sellers where brand_name = 'Deck Shop';`);
+  const [[cold]] = await sql(
+    `insert into products (seller_id, title, price, interest, city, stock, status)
+     values ('${sid}', 'Nobody Has Seen This', 500, 'clothing', 'Karachi', 3, 'live') returning id;`);
+  await sql(`insert into photos (product_id, position, key) values ('${cold}', 0, 'k/cold');`);
+  const [[after]] = await sql(`select trending(40)::text;`, { role: 'anon' });
+  assert.ok(!JSON.parse(after).items.some(p => p.id === cold), 'no impressions, no heat');
+
+  // Give it activity and it should appear.
+  await sql(`insert into product_stats (product_id, day, impressions, keeps, detail_views, adds)
+             values ('${cold}', current_date, 90, 40, 25, 12);`);
+  const [[hot]] = await sql(`select trending(40)::text;`, { role: 'anon' });
+  assert.ok(JSON.parse(hot).items.some(p => p.id === cold), 'activity should surface it');
+  assert.ok(seen.size >= 0);
+});

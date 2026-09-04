@@ -12,7 +12,6 @@ import { auth, rpc, db, storage } from './sb.js';
 import { prepare, baseKey, objectName, objectNames } from './photos.js';
 import { el, esc, ICON, money, toast } from '../ui.js';
 import { statusRail, pop } from '../motion.js';
-import { adminSuite } from './admin.js';
 
 const app = document.getElementById('app');
 const INTERESTS = [
@@ -899,7 +898,7 @@ async function render() {
  *
  * `preferShop` lets an account that is both switch back to its own workspace.
  */
-let preferShop = false;
+let preferShop = new URLSearchParams(location.search).has('shop');
 
 async function boot() {
   app.setAttribute('aria-busy', 'true');
@@ -907,13 +906,11 @@ async function boot() {
   try {
     const [control, shop] = await Promise.all([rpc('is_admin'), rpc('me')]);
     me = shop;
-    if (control && !preferShop) {
-      await adminSuite({
-        alsoASeller: !!shop,
-        onSwitchToShop: () => { preferShop = true; boot(); }
-      });
-      return;
-    }
+    // The control suite lives on its own page now, the way NovaX splits
+    // client.html from admin.html. One sign-in still, and this side names
+    // nothing — the redirect is what an admin gets, and `?shop=1` is how one
+    // who also sells comes back here.
+    if (control && !preferShop) { location.replace('admin.html'); return; }
     await render();
   } catch (err) {
     // An expired or revoked session should return someone to the sign-in

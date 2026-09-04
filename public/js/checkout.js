@@ -17,6 +17,7 @@ import { el, esc, ICON, money, toast } from './ui.js';
 import { priceOrder, normalisePhone, prettyPhone, orderCode, RULES } from './money.mjs';
 import { statusRail } from './motion.js';
 import { reviewSheet } from './shop.js';
+import { account, signUpGate } from './account.js';
 
 const lineFrom = p => ({ id: p.id, seller_id: p.seller_id, title: p.title, price: p.price, photo: p.photos[0], city: p.city, brand: p.seller.brand_name });
 
@@ -48,7 +49,8 @@ export async function bagScreen({ onOpen, onCheckout }) {
     <div class="screen">
       <div class="top">
         <h1>Your bag</h1>
-        <a class="btn ghost" href="#/orders" style="min-height:36px;padding:0 13px;font-size:14px">Orders</a>
+        <a class="btn ghost" href="#/inbox" style="min-height:36px;padding:0 11px;font-size:14px">Messages</a>
+        <a class="btn ghost" href="#/orders" style="min-height:36px;padding:0 11px;font-size:14px">Orders</a>
       </div>
       <div class="scroll" id="body"></div>
     </div>`);
@@ -133,12 +135,27 @@ export async function bagScreen({ onOpen, onCheckout }) {
 export async function checkoutScreen({ onBack, onPlaced }) {
   const lines = await bagLines();
   if (!lines.length) { onBack(); return el('<div class="screen"></div>'); }
+
+  /* The barrier. Everything before this is account-free on purpose; from here
+     on an order needs a name, an email and a phone anyway, so we ask once and
+     keep them. Cancelling goes back to the bag rather than stranding anyone on
+     a form they did not want. */
+  if (!account.signedIn || !(await api.meBuyer())) {
+    signUpGate({
+      el, esc, api, store,
+      onDone: () => location.reload(),
+      onCancel: onBack
+    });
+    return el('<div class="screen"><div class="empty"><p>One moment…</p></div></div>');
+  }
   const sellers = await api.sellers();
   const saved = store.get().contact || {};
+  const me = account.profile || {};
 
   const form = {
-    name: saved.name || '',
-    phone: saved.phone || '',
+    // The account fills in what it knows; the address is still per-order.
+    name: me.name || saved.name || '',
+    phone: me.phone || saved.phone || '',
     city: saved.city || '',
     area: saved.area || '',
     address: saved.address || '',
@@ -406,13 +423,20 @@ export async function checkoutScreen({ onBack, onPlaced }) {
    or a cleared browser — a lookup that needs the code AND the number it was
    placed with, exactly as get_order() enforces server-side. */
 export async function ordersScreen({ onOpen }) {
-  const mine = store.get().orders;
+  let mine = store.get().orders;
   const root = el(`
     <div class="screen">
       <div class="top"><h1>Your orders</h1></div>
       <div class="scroll" id="body"></div>
     </div>`);
   const body = root.querySelector('#body');
+
+  if (account.signedIn) {
+    // Signed in, history comes from the account rather than from what this
+    // device happens to remember.
+    const server = await api.myOrders();
+    if (server.length) mine = server.map(o => ({ code: o.code, placed_at: o.placed_at, total: o.total }));
+  }
 
   if (mine.length) {
     const list = el('<div class="group"><header><h2>Placed on this device</h2></header></div>');
