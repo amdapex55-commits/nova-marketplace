@@ -202,10 +202,35 @@ Approving a shop releases every listing queued behind it; suspending pulls them
 back out of the deck in the same motion. Promotion is admin-only — it is
 something we sell, and a seller must not be able to help themselves to it.
 
+## Auth: no email confirmation, on purpose
+
+`mailer_autoconfirm` is **on**, so signing up creates an account and signs the
+seller straight in. It was off, but nothing could deliver the mail: no SMTP
+provider is connected, and Supabase's shared sender throttles to a handful an
+hour — so the confirmation link the screen promised often never arrived. A
+sign-up that dead-ends is a worse failure than one that never asked.
+
+**What actually gates a shop is a person.** Every new seller lands on `pending`
+and reaches no buyer until an admin approves them by hand, so an unverified
+email address buys nobody anything.
+
+What this costs, and it is real:
+
+- **No password reset.** It needs email. The sign-up form says so; until SMTP
+  exists, reset a password from the Supabase dashboard.
+- **Anyone can sign up with somebody else's address.** They still cannot sell
+  without approval, and the phone number is checked by hand at that point.
+- **A typo'd email is unrecoverable** by the seller themselves.
+
+Connect a provider (Resend, Brevo) and this is the first thing to reverse: set
+`mailer_autoconfirm` false, and `signUp()` starts returning no session — it
+already falls back to signing in, so handle the confirmation case there.
+
 ## Not built yet
 
 The buyer app's read path against PostgREST · R2 instead of Supabase Storage ·
 buyer-facing order status · an admin panel for approving sellers and marking
 subscriptions paid · report-a-listing · subscription billing · a custom SMTP
-provider, without which seller signup silently fails after a few an hour.
+provider — which would restore email confirmation and password reset, neither of
+which exists today.
 See the vault: `Nova OS / Nova Marketplace`.

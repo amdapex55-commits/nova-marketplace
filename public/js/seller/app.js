@@ -58,6 +58,7 @@ function signedOut() {
           <div class="field">
             <label for="password">Password ${mode === 'up' ? '<span class="hint">at least 8 characters</span>' : ''}</label>
             <input id="password" type="password" autocomplete="${mode === 'in' ? 'current-password' : 'new-password'}">
+            ${mode === 'up' ? '<div class="hint">There is no password reset yet — write this one down.</div>' : ''}
           </div>
           <button class="btn block" id="go">${mode === 'in' ? 'Sign in' : 'Create my account'}</button>
           <div class="err" id="err" role="alert" hidden></div>
@@ -82,22 +83,8 @@ function signedOut() {
       btn.disabled = true;
       btn.textContent = mode === 'in' ? 'Signing in…' : 'Creating…';
       try {
-        if (mode === 'in') {
-          await auth.signIn(email, password);
-        } else {
-          const { needsConfirmation } = await auth.signUp(email, password);
-          if (needsConfirmation) {
-            // Confirmation is on and Supabase's shared sender is heavily
-            // throttled, so say exactly what to expect rather than looping.
-            pane.replaceChildren(el(`
-              <div class="empty">
-                <h2>Check your email</h2>
-                <p>We sent a confirmation link to <b>${esc(email)}</b>. Open it, then come back and sign in.</p>
-                <p style="font-size:13px;color:var(--ink-faint)">It can take a few minutes. If nothing arrives, tell Aisha — the sending limit is low until we connect our own mail provider.</p>
-              </div>`));
-            return;
-          }
-        }
+        if (mode === 'in') await auth.signIn(email, password);
+        else await auth.signUp(email, password);
         await boot();
       } catch (e) {
         show(e.message || 'That did not work.');
