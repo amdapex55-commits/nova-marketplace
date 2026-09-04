@@ -386,3 +386,31 @@ input, select, textarea { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Fine print under a listing: how buying works, and how to report it. Quiet on
+   purpose — present for anyone looking for it, never competing with the price. */
+.fineprint {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--rule-soft);
+  font-size: 13px;
+}
+.fineprint a, .fineprint button {
+  color: var(--ink-faint); text-decoration: underline; text-underline-offset: 3px;
+  font-size: 13px;
+}
+.fineprint a:hover, .fineprint button:hover { color: var(--ink); }
+
+/* The legal screen. Long-form reading on a phone: a narrower measure, more room
+   between paragraphs, and headings that are findable while scrolling fast. */
+.legal { padding: 4px 18px 30px; max-width: 62ch; }
+.legal h2 {
+  font-family: "Familjen Grotesk", system-ui, sans-serif;
+  font-size: 18px; font-weight: 600; margin: 26px 0 6px;
+}
+.legal h2:first-child { margin-top: 6px; }
+.legal p { margin: 0 0 11px; color: var(--ink-soft); line-height: 1.62; }
+.legal p b { color: var(--ink); font-weight: 600; }
+.legal .asof {
+  margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--rule-soft);
+  font-size: 12.5px; color: var(--ink-faint);
+}

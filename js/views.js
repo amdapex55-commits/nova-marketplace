@@ -214,6 +214,10 @@ export async function productScreen({ id, onBack, onBag }) {
             <div><dt>In stock</dt><dd>${p.stock > 0 ? `${p.stock} left` : 'Sold out'}</dd></div>
             <div><dt>Seller rating</dt><dd>${esc(p.seller.rating)} / 5</dd></div>
           </dl>
+          <div class="fineprint">
+            <a href="#/legal">How buying on Nova works</a>
+            <button id="report">Report this listing</button>
+          </div>
         </div>
       </div>
       <div class="sticky-buy">
@@ -252,5 +256,157 @@ export async function productScreen({ id, onBack, onBag }) {
     });
   });
 
+  root.querySelector('#report').addEventListener('click', () => reportSheet(p));
+
+  return root;
+}
+
+/* ------------------------------------------------------------------- report */
+/* Deliberately short. A form that asks for an essay gets no reports at all, and
+   the reason alone is enough for someone to go and look at the listing. */
+const REASONS = [
+  ['counterfeit', 'Fake or counterfeit'],
+  ['prohibited', 'Not allowed on Nova'],
+  ['misleading', 'Photos or description are misleading'],
+  ['offensive', 'Offensive or inappropriate'],
+  ['scam', 'I think this is a scam'],
+  ['other', 'Something else']
+];
+
+function reportSheet(product) {
+  let reason = null;
+  const sheet = el(`
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Report this listing">
+      <div class="sheet-in">
+        <div class="sheet-bar">
+          <h2>Report this listing</h2>
+          <button class="btn ghost" id="close" style="min-height:34px;padding:0 12px;font-size:13px">Close</button>
+        </div>
+        <div class="group" style="margin-top:14px">
+          <div class="inner">
+            <div role="radiogroup" aria-label="Reason" id="reasons" style="display:flex;flex-direction:column;gap:8px"></div>
+            <div class="field">
+              <label for="detail">Anything else? <span class="hint">optional</span></label>
+              <textarea id="detail" maxlength="500" placeholder="What made you report it?"></textarea>
+            </div>
+            <button class="btn block" id="send" disabled>Send report</button>
+            <div class="err" id="rerr" role="alert" hidden></div>
+            <p style="font-size:12.5px;color:var(--ink-faint);margin:0">
+              We read every report. Nothing is sent to the seller, and they are not told who reported them.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>`);
+
+  const list = sheet.querySelector('#reasons');
+  const send = sheet.querySelector('#send');
+  for (const [value, label] of REASONS) {
+    const b = el(`<button class="opt" role="radio" aria-checked="false"><span class="mark"><i></i></span><span><b>${label}</b></span></button>`);
+    b.addEventListener('click', () => {
+      reason = value;
+      for (const o of list.children) o.setAttribute('aria-checked', String(o === b));
+      send.disabled = false;
+    });
+    list.append(b);
+  }
+
+  const close = () => sheet.remove();
+  sheet.querySelector('#close').addEventListener('click', close);
+  sheet.addEventListener('click', ev => { if (ev.target === sheet) close(); });
+
+  send.addEventListener('click', async () => {
+    send.disabled = true;
+    send.textContent = 'Sending…';
+    try {
+      const out = await api.reportListing(product.id, reason, sheet.querySelector('#detail').value.trim());
+      toast(out?.already ? 'You have already reported this one' : 'Reported — thank you');
+      close();
+    } catch (err) {
+      const e = sheet.querySelector('#rerr');
+      e.hidden = false;
+      e.textContent = err?.message || 'Could not send that report.';
+      send.disabled = false;
+      send.textContent = 'Send report';
+    }
+  });
+
+  document.body.append(sheet);
+}
+
+
+/* ------------------------------------------------------------------- legal */
+/* One screen rather than three separate pages. Nobody reads a wall of clauses,
+   and the things that actually cause arguments here — who you are buying from,
+   who holds the money, what happens at the door — fit on a page. Meta also
+   wants terms and a privacy statement reachable before they will run ads. */
+export function legalScreen({ onBack }) {
+  const root = el(`
+    <div class="screen">
+      <div class="scroll">
+        <div class="top">
+          <button class="back" aria-label="Back">${ICON.back}</button>
+          <h1>How Nova works</h1>
+        </div>
+        <div class="legal">
+          <h2>Who you are buying from</h2>
+          <p>Nova is a marketplace, not a shop. Every listing belongs to an
+            independent seller who makes or sources it, packs it and sends it. We
+            check each shop by hand before it can sell here, but the seller — not
+            Nova — is who you are buying from.</p>
+
+          <h2>Money</h2>
+          <p><b>Nova never takes your money.</b> You pay the seller directly:
+            cash to the rider when the parcel reaches you, or a transfer straight
+            to the seller for larger orders. Nothing passes through us, and we
+            never ask for card details.</p>
+          <p>If anyone claiming to be from Nova asks you to send money to them,
+            it is not us. Report the listing.</p>
+
+          <h2>At the door</h2>
+          <p>Open the parcel and check it before you pay the rider. If it is not
+            what was listed you do not have to accept it, and refusing costs you
+            nothing.</p>
+          <p>An order with items from more than one seller arrives as separate
+            parcels, possibly on different days, each paid for separately. Your
+            order page shows where each one has got to.</p>
+
+          <h2>Returns</h2>
+          <p>Returns are between you and the seller, and each shop sets its own
+            terms — ask before you order if it matters. Checking the parcel at
+            the door is the protection that always works.</p>
+
+          <h2>What may not be sold here</h2>
+          <p>Counterfeit or replica goods · anything stolen · weapons and
+            ammunition · drugs, alcohol, tobacco and vapes · medicines and
+            supplements · live animals · currency, documents and identity papers
+            · adult material · anything needing a licence to sell · anything
+            illegal in Pakistan.</p>
+          <p>Listings that break this are removed and the shop can be suspended.
+            <b>Report anything you see</b> — the button is on every listing, and
+            the seller is never told who reported them.</p>
+
+          <h2>What we keep about you</h2>
+          <p>You can browse, swipe and fill a bag with no account, and none of it
+            leaves your phone: your interests, saved items and bag are stored in
+            your own browser.</p>
+          <p>When you place an order we keep what is needed to deliver it — your
+            name, mobile number and address — and the sellers in that order see
+            it so they can bring it to you. That is all. We do not sell it, we do
+            not send marketing to it, and we do not track you across other sites.</p>
+          <p>We count how many people see and save each listing so sellers know
+            what is working. Those are totals, never a record of who did what.</p>
+
+          <h2>Disagreements</h2>
+          <p>Talk to the seller first — most problems are a wrong size or a slow
+            week. If that goes nowhere, report the listing and we will look at it.
+            We can remove listings and suspend shops; we cannot make a seller
+            refund you, because we never held the money.</p>
+
+          <p class="asof">Pakistan · last updated 4 September 2026</p>
+        </div>
+      </div>
+    </div>`);
+  root.querySelector('.back').addEventListener('click', onBack);
   return root;
 }

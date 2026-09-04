@@ -8,7 +8,7 @@
 import { api } from './api.js';
 import { store } from './store.js';
 import { el, ICON } from './ui.js';
-import { onboarding, browseScreen, searchScreen, wishlistScreen, productScreen } from './views.js';
+import { onboarding, browseScreen, searchScreen, wishlistScreen, productScreen, legalScreen } from './views.js';
 import { deckScreen } from './deck.js';
 import { bagScreen, checkoutScreen, orderScreen, ordersScreen } from './checkout.js';
 
@@ -83,6 +83,8 @@ async function route() {
       }), { tab: '#/bag' });
     case 'checkout':
       return paint(() => checkoutScreen({ onBack: () => go('#/bag'), onPlaced: code => go(`#/order/${code}`) }));
+    case 'legal':
+      return paint(() => legalScreen({ onBack: () => history.back() }));
     case 'orders':
       return paint(() => ordersScreen({ onOpen: code => go(`#/order/${code}`) }), { tab: '#/bag' });
     case 'order':

@@ -15,7 +15,14 @@
 const KEY = 'nova.v1';
 const SEEN_CAP = 3000;
 
+/* A random id for this browser. Not a person and not tracked across sites — it
+   exists so a report can be rate-limited and duplicate reports collapsed, and
+   so the deck can be told what this device has already seen. */
+const newDeviceId = () =>
+  [...crypto.getRandomValues(new Uint8Array(9))].map(b => b.toString(16).padStart(2, '0')).join('');
+
 const blank = () => ({
+  device_id: newDeviceId(),
   gender: null,          // 'women' | 'men' | 'everything' | null (skipped)
   interests: [],         // ids from catalog.interests
   onboarded: false,
@@ -47,6 +54,12 @@ function commit() {
 
 export const store = {
   get: () => state,
+
+  deviceId() {
+    // Older saved state predates this field; mint one rather than sending null.
+    if (!state.device_id) { state.device_id = newDeviceId(); commit(); }
+    return state.device_id;
+  },
   subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
 
   setOnboarding({ gender, interests }) {

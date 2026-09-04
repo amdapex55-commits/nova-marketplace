@@ -21,10 +21,10 @@ window.NOVAMKT = {
      a Supabase project exists, because the seller workspace needs the real one
      while the buyer app is not ready for it: seller.html talks to Postgres
      today, but js/api.js still reads its catalogue from fixtures. Flipping this
-     to 'live' before the read path in api.js is wired would hand fixture
-     product ids to a real place_order and fail every order.
-     Change it in the same commit that wires api.js, not before. */
-  BUYER_BACKEND: 'fixtures',
+     Flipped to 'live' on 4 Sep in the same commit that wired the read path.
+     'fixtures' still works and is the way to demo the app without a database —
+     the demo catalogue in public/data is kept for exactly that. */
+  BUYER_BACKEND: 'live',
 
   BRAND: 'Nova',
   TAGLINE: 'Swipe the best of the internet',

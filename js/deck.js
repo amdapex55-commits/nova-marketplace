@@ -207,7 +207,7 @@ export function deckScreen({ onOpen }) {
   /* ---------- decisions ---------- */
 
   function fly(node, product, dir) {
-    if (busy) return;
+    if (busy || !node?.classList.contains('swipe-card') || !product) return;
     busy = true;
     node.classList.add('settling');
     node.style.transform = `translate3d(${dir * (innerWidth + 220)}px, -40px, 0) rotate(${dir * 22}deg)`;
@@ -241,7 +241,11 @@ export function deckScreen({ onOpen }) {
   }
 
   function decide(dir) {
-    const top = deck.lastElementChild;
+    // The deck's last child is not always a card: it is the ghost stack while a
+    // page is loading, and the end-of-deck panel when there is nothing left.
+    // Pressing pass or save then reached fly(), which looks for a `.stamp` that
+    // does not exist and crashed on null. Ask for a real card.
+    const top = deck.querySelector('.swipe-card:last-of-type');
     if (!top || !queue.length || busy) return;
     fly(top, queue[0], dir);
   }

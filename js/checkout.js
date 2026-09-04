@@ -307,9 +307,14 @@ export async function checkoutScreen({ onBack, onPlaced }) {
     }
 
     const priced = totals();
+    // Live, the server re-prices this from the rows and returns the real order;
+    // everything below it is what the buyer was shown, and what the fixture
+    // backend stores verbatim.
     const order = {
       code: orderCode(),
       placed_at: new Date().toISOString(),
+      // What the server actually acts on: ids and quantities, never prices.
+      lines: lines.map(l => ({ product_id: l.id, qty: l.qty })),
       // The prices are snapshotted here so the confirmation can never disagree
       // with what was agreed. The live version re-reads them server-side before
       // writing: a price that arrived from a browser is a price an attacker
@@ -340,19 +345,37 @@ export async function checkoutScreen({ onBack, onPlaced }) {
       }))
     };
 
+    const btn = foot.querySelector('.btn');
+    btn.disabled = true;
+    btn.textContent = 'Placing your order…';
+
+    let placed;
     try {
-      await api.placeOrder(order);
+      placed = await api.placeOrder(order);
     } catch (err) {
-      toast('Could not place the order — try again');
+      // The server's own words: "not enough stock", "a listing is no longer
+      // available", the cash limit. Far more use than "try again".
+      toast(err?.message || 'Could not place the order — try again');
       console.error(err);
+      btn.disabled = false;
+      render();
       return;
     }
 
+    // Live, the authoritative order comes back from place_order(); the code and
+    // the totals are the server's, not ours.
+    const final = placed?.code ? placed : order;
+
     const { notes, ...keep } = form;
     store.rememberContact({ ...keep, phone: normalisePhone(form.phone) });
-    store.recordOrder({ code: order.code, placed_at: order.placed_at, total: order.totals.total });
+    // The phone is kept with the order because get_order() needs both, and an
+    // order the buyer cannot open again is an order they will phone about.
+    store.recordOrder({
+      code: final.code, placed_at: final.placed_at,
+      total: final.totals.total, phone: normalisePhone(form.phone)
+    });
     store.clearBag();
-    onPlaced(order.code);
+    onPlaced(final.code);
   }
 
   render();
@@ -420,6 +443,13 @@ export async function ordersScreen({ onOpen }) {
       return;
     }
     const found = await api.order(code, phone);
+    if (found) {
+      // Remember it, so opening this order again on this device does not ask
+      // for the number a second time.
+      if (!store.get().orders.some(o => o.code === found.code)) {
+        store.recordOrder({ code: found.code, placed_at: found.placed_at, total: found.totals.total, phone });
+      }
+    }
     if (!found) {
       // One message for "no such code" and "wrong number" on purpose: telling
       // someone a code exists but the phone is wrong turns the lookup into a
@@ -437,7 +467,12 @@ export async function ordersScreen({ onOpen }) {
 
 /* ------------------------------------------------------------- confirmation */
 export async function orderScreen({ code, onHome, onOrders }) {
-  const order = await api.order(code);
+  // get_order() wants the phone as well as the code, so an order this device
+  // placed is opened with the number it was placed with. Reading it again each
+  // time is the point: this is where the buyer comes back to see whether the
+  // parcel has moved.
+  const remembered = store.get().orders.find(o => o.code === code);
+  const order = await api.order(code, remembered?.phone ?? null);
   if (!order) return el('<div class="screen"><div class="empty"><h2>We cannot find that order</h2><p>Check the code, or the phone number it was placed with.</p></div></div>');
 
   const root = el(`
@@ -445,7 +480,9 @@ export async function orderScreen({ code, onHome, onOrders }) {
       <div class="scroll">
         <div class="done">
           <div class="tick">${ICON.tick}</div>
-          <h1>Order placed</h1>
+          <h1>${order.shipments.every(s => s.status === 'delivered') ? 'Delivered'
+              : order.shipments.some(s => (s.status || 'placed') !== 'placed') ? 'On its way'
+              : 'Order placed'}</h1>
           <div class="code">${esc(order.code)}</div>
           <p>Keep this code. Each seller will call ${esc(prettyPhone(order.contact.phone))} to confirm before they dispatch.</p>
         </div>
